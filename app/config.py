@@ -64,6 +64,7 @@ class DashboardConfig:
     auth_enabled: bool = False
     username: str = ""
     password: str = ""
+    session_secret: str = ""
 
 
 @dataclass(frozen=True)
@@ -209,6 +210,7 @@ def _build_config(raw_config: Mapping[str, Any]) -> AppConfig:
                 ),
                 username=str(dashboard_config.get("username", "")),
                 password=str(dashboard_config.get("password", "")),
+                session_secret=str(dashboard_config.get("session_secret", "")),
             ),
             alerts=AlertConfig(
                 enabled=_as_bool(alert_config.get("enabled", False), "alerts.enabled"),
@@ -282,6 +284,7 @@ def _apply_environment_overrides(config: AppConfig) -> AppConfig:
         auth_enabled=_env_bool("DASHBOARD_AUTH_ENABLED", config.dashboard.auth_enabled),
         username=os.getenv("DASHBOARD_USERNAME", config.dashboard.username),
         password=os.getenv("DASHBOARD_PASSWORD", config.dashboard.password),
+        session_secret=os.getenv("DASHBOARD_SESSION_SECRET", config.dashboard.session_secret),
     )
     alert_config = AlertConfig(
         enabled=_env_bool("ALERTS_ENABLED", config.alerts.enabled),

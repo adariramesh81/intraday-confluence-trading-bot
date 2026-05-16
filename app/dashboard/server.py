@@ -5,19 +5,24 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import AppConfig, load_config
 from app.dashboard.api import router as api_router
 from app.dashboard.auth import (
+    AUTH_REQUIRED_MESSAGE,
+    SESSION_COOKIE_NAME,
+    create_session_cookie_value,
+    credentials_are_valid,
     protected_http_path,
+    public_http_path,
     request_is_authorized,
-    unauthorized_response,
     websocket_is_authorized,
 )
 from app.dashboard.schemas import HealthStatus
@@ -61,10 +66,15 @@ def create_app(
 
     @app.middleware("http")
     async def require_dashboard_auth(request: Request, call_next):
-        """Protect dashboard and account data routes with Basic Auth when enabled."""
+        """Protect dashboard and account data routes with a signed session cookie."""
 
-        if protected_http_path(request.url.path) and not request_is_authorized(request, app_config.dashboard):
-            return unauthorized_response()
+        path = request.url.path
+        if app_config.dashboard.auth_enabled and not public_http_path(path):
+            authorized = request_is_authorized(request, app_config.dashboard)
+            if path == "/" and not authorized:
+                return RedirectResponse("/login", status_code=303)
+            if protected_http_path(path) and not authorized:
+                return JSONResponse({"detail": AUTH_REQUIRED_MESSAGE}, status_code=401)
         return await call_next(request)
 
     @app.on_event("startup")
@@ -109,8 +119,54 @@ def create_app(
             {
                 "title": app_config.dashboard.title,
                 "refresh_seconds": app_config.dashboard.refresh_seconds,
+                "auth_enabled": app_config.dashboard.auth_enabled,
             },
         )
+
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_form(request: Request):
+        """Render the dashboard login page."""
+
+        if not app_config.dashboard.auth_enabled or request_is_authorized(request, app_config.dashboard):
+            return RedirectResponse("/", status_code=303)
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"title": app_config.dashboard.title, "error": None},
+        )
+
+    @app.post("/login", response_class=HTMLResponse)
+    async def login(request: Request):
+        """Validate login credentials and create a browser-session cookie."""
+
+        form = parse_qs((await request.body()).decode("utf-8"))
+        username = form.get("username", [""])[0]
+        password = form.get("password", [""])[0]
+        if credentials_are_valid(username, password, app_config.dashboard):
+            response = RedirectResponse("/", status_code=303)
+            response.set_cookie(
+                SESSION_COOKIE_NAME,
+                create_session_cookie_value(app_config.dashboard),
+                httponly=True,
+                secure=app_config.env == "production",
+                samesite="lax",
+                path="/",
+            )
+            return response
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"title": app_config.dashboard.title, "error": "Invalid username or password."},
+            status_code=401,
+        )
+
+    @app.get("/logout")
+    async def logout() -> RedirectResponse:
+        """Clear the dashboard session cookie and return to login."""
+
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        return response
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

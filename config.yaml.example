@@ -38,6 +38,7 @@ dashboard:
   auth_enabled: false
   username: ""
   password: ""
+  session_secret: ""
 
 alerts:
   enabled: false

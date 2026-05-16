@@ -54,6 +54,7 @@ DASHBOARD_REFRESH_SECONDS=5
 DASHBOARD_AUTH_ENABLED=true
 DASHBOARD_USERNAME=<your username>
 DASHBOARD_PASSWORD=<strong password>
+DASHBOARD_SESSION_SECRET=<long random value>
 LOG_LEVEL=INFO
 LOG_FILE_PATH=logs/trading_bot.log
 ```
@@ -84,20 +85,19 @@ Railway health checks use:
 After deploy:
 
 1. Open the Railway-generated URL.
-2. Confirm the browser asks for your dashboard username and password.
-3. Confirm the dashboard loads after login.
+2. Confirm `/` redirects to the app login page.
+3. Confirm the dashboard loads after signing in.
 4. Confirm `/healthz` returns `200` without credentials.
-5. Confirm `/api/snapshot` returns `401` without credentials.
-6. Confirm `/api/snapshot` returns account data with credentials.
+5. Confirm `/api/snapshot` returns `401` before signing in.
+6. Confirm `/api/snapshot` returns account data after signing in.
 7. Confirm the dashboard shows Alpaca paper cash, equity, buying power, positions, and recent orders.
 8. Confirm Railway logs show `Alpaca paper account sync completed.`
 9. Confirm logs never show live trading enabled.
 
-Example credentialed snapshot check:
+Generate a session secret locally with:
 
 ```bash
-curl -u "$DASHBOARD_USERNAME:$DASHBOARD_PASSWORD" \
-  https://your-railway-url/api/snapshot
+python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 The unauthenticated snapshot check should be rejected:
@@ -122,6 +122,7 @@ docker run --rm -p 8000:8000 \
   -e DASHBOARD_AUTH_ENABLED=true \
   -e DASHBOARD_USERNAME=admin \
   -e DASHBOARD_PASSWORD=change-me-before-deploy \
+  -e DASHBOARD_SESSION_SECRET=local-dev-session-secret \
   intraday-confluence-trading-bot
 ```
 
@@ -133,6 +134,6 @@ http://127.0.0.1:8000/
 
 ## 6. Security Notes
 
-This deployment uses HTTP Basic Auth for one shared dashboard login. Use a long, unique password and store it only in Railway variables.
+This deployment uses an app login page with one shared dashboard account. Use a long, unique password and a random `DASHBOARD_SESSION_SECRET`; store both only in Railway variables.
 
 Before sharing the dashboard URL or using this beyond development, consider adding a stronger authentication provider or network-level access control.

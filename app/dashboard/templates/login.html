@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }} Login</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+  </head>
+  <body class="login-body">
+    <main class="login-shell">
+      <section class="login-panel" aria-label="Dashboard login">
+        <div class="login-header">
+          <span class="login-kicker">Paper Monitoring</span>
+          <h1>{{ title }}</h1>
+          <p>Sign in to view the read-only trading dashboard.</p>
+        </div>
+        <form class="login-form" method="post" action="/login">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+          {% if error %}
+          <p class="login-error">{{ error }}</p>
+          {% endif %}
+
+          <button type="submit">Sign in</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

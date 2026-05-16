@@ -1,4 +1,3 @@
-import base64
 import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -90,11 +89,6 @@ def _state_manager() -> DashboardStateManager:
     return state
 
 
-def _auth_header(username: str = "admin", password: str = "secret") -> dict[str, str]:
-    token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
-    return {"Authorization": f"Basic {token}"}
-
-
 def _auth_config(username: str = "admin", password: str = "secret") -> AppConfig:
     return AppConfig(
         dashboard=DashboardConfig(
@@ -102,7 +96,16 @@ def _auth_config(username: str = "admin", password: str = "secret") -> AppConfig
             auth_enabled=True,
             username=username,
             password=password,
+            session_secret="test-session-secret",
         )
+    )
+
+
+def _login(client: TestClient, username: str = "admin", password: str = "secret"):
+    return client.post(
+        "/login",
+        data={"username": username, "password": password},
+        follow_redirects=False,
     )
 
 
@@ -122,37 +125,72 @@ def test_dashboard_api_returns_read_only_snapshot() -> None:
     assert payload["signals"][0]["score"] == 100
 
 
-def test_dashboard_auth_rejects_unauthenticated_page_and_snapshot() -> None:
+def test_dashboard_auth_redirects_unauthenticated_page_and_blocks_snapshot() -> None:
     app = create_app(config=_auth_config(), state_manager=_state_manager())
     client = TestClient(app)
 
+    page_response = client.get("/", follow_redirects=False)
+    snapshot_response = client.get("/api/snapshot")
+
+    assert page_response.status_code == 303
+    assert page_response.headers["location"] == "/login"
+    assert snapshot_response.status_code == 401
+    assert snapshot_response.json()["detail"] == "Authentication required."
+
+
+def test_login_page_renders_before_dashboard() -> None:
+    app = create_app(config=_auth_config(), state_manager=_state_manager())
+    client = TestClient(app)
+
+    response = client.get("/login")
+
+    assert response.status_code == 200
+    assert "Sign in to view the read-only trading dashboard." in response.text
+    assert 'name="username"' in response.text
+    assert 'name="password"' in response.text
+
+
+def test_login_sets_session_cookie_and_allows_dashboard_access() -> None:
+    app = create_app(config=_auth_config(), state_manager=_state_manager())
+    client = TestClient(app)
+
+    login_response = _login(client)
     page_response = client.get("/")
     snapshot_response = client.get("/api/snapshot")
 
-    assert page_response.status_code == 401
-    assert snapshot_response.status_code == 401
-    assert page_response.headers["www-authenticate"] == 'Basic realm="Intraday Confluence Dashboard"'
-
-
-def test_dashboard_auth_allows_valid_basic_credentials() -> None:
-    app = create_app(config=_auth_config(), state_manager=_state_manager())
-    client = TestClient(app)
-
-    page_response = client.get("/", headers=_auth_header())
-    snapshot_response = client.get("/api/snapshot", headers=_auth_header())
-
+    assert login_response.status_code == 303
+    assert login_response.headers["location"] == "/"
+    assert "dashboard_session=" in login_response.headers["set-cookie"]
     assert page_response.status_code == 200
+    assert "Logout" in page_response.text
     assert snapshot_response.status_code == 200
     assert snapshot_response.json()["portfolio"]["cash"] == 50_000
 
 
-def test_dashboard_auth_rejects_invalid_credentials() -> None:
+def test_login_rejects_invalid_credentials_without_session_cookie() -> None:
     app = create_app(config=_auth_config(), state_manager=_state_manager())
     client = TestClient(app)
 
-    response = client.get("/api/snapshot", headers=_auth_header(password="wrong"))
+    response = _login(client, password="wrong")
 
     assert response.status_code == 401
+    assert "Invalid username or password." in response.text
+    assert "dashboard_session=" not in response.headers.get("set-cookie", "")
+
+
+def test_logout_clears_session_and_returns_to_login() -> None:
+    app = create_app(config=_auth_config(), state_manager=_state_manager())
+    client = TestClient(app)
+
+    _login(client)
+    logout_response = client.get("/logout", follow_redirects=False)
+    page_response = client.get("/", follow_redirects=False)
+
+    assert logout_response.status_code == 303
+    assert logout_response.headers["location"] == "/login"
+    assert "dashboard_session=" in logout_response.headers["set-cookie"]
+    assert page_response.status_code == 303
+    assert page_response.headers["location"] == "/login"
 
 
 def test_dashboard_auth_fails_closed_when_credentials_missing() -> None:
@@ -162,7 +200,7 @@ def test_dashboard_auth_fails_closed_when_credentials_missing() -> None:
     )
     client = TestClient(app)
 
-    response = client.get("/api/snapshot", headers=_auth_header())
+    response = client.get("/api/snapshot")
 
     assert response.status_code == 401
 
@@ -229,11 +267,12 @@ def test_dashboard_websocket_rejects_unauthenticated_connection() -> None:
             pass
 
 
-def test_dashboard_websocket_allows_valid_basic_credentials() -> None:
+def test_dashboard_websocket_allows_valid_session_cookie() -> None:
     app = create_app(config=_auth_config(), state_manager=_state_manager())
     client = TestClient(app)
 
-    with client.websocket_connect("/ws/dashboard", headers=_auth_header()) as websocket:
+    _login(client)
+    with client.websocket_connect("/ws/dashboard") as websocket:
         payload = websocket.receive_json()
 
     assert payload["portfolio"]["cash"] == 50_000
