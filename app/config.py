@@ -61,6 +61,9 @@ class DashboardConfig:
     port: int = 8000
     refresh_seconds: int = 5
     title: str = "Intraday Confluence Bot"
+    auth_enabled: bool = False
+    username: str = ""
+    password: str = ""
 
 
 @dataclass(frozen=True)
@@ -200,6 +203,12 @@ def _build_config(raw_config: Mapping[str, Any]) -> AppConfig:
                     "dashboard.refresh_seconds",
                 ),
                 title=str(dashboard_config.get("title", "Intraday Confluence Bot")),
+                auth_enabled=_as_bool(
+                    dashboard_config.get("auth_enabled", False),
+                    "dashboard.auth_enabled",
+                ),
+                username=str(dashboard_config.get("username", "")),
+                password=str(dashboard_config.get("password", "")),
             ),
             alerts=AlertConfig(
                 enabled=_as_bool(alert_config.get("enabled", False), "alerts.enabled"),
@@ -270,6 +279,9 @@ def _apply_environment_overrides(config: AppConfig) -> AppConfig:
         port=_env_int("DASHBOARD_PORT", config.dashboard.port),
         refresh_seconds=_env_int("DASHBOARD_REFRESH_SECONDS", config.dashboard.refresh_seconds),
         title=os.getenv("DASHBOARD_TITLE", config.dashboard.title),
+        auth_enabled=_env_bool("DASHBOARD_AUTH_ENABLED", config.dashboard.auth_enabled),
+        username=os.getenv("DASHBOARD_USERNAME", config.dashboard.username),
+        password=os.getenv("DASHBOARD_PASSWORD", config.dashboard.password),
     )
     alert_config = AlertConfig(
         enabled=_env_bool("ALERTS_ENABLED", config.alerts.enabled),

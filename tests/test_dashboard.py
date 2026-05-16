@@ -1,8 +1,11 @@
+import base64
 import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from app.config import AlertConfig, AppConfig, DashboardConfig
 from app.dashboard.schemas import (
@@ -87,6 +90,22 @@ def _state_manager() -> DashboardStateManager:
     return state
 
 
+def _auth_header(username: str = "admin", password: str = "secret") -> dict[str, str]:
+    token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {token}"}
+
+
+def _auth_config(username: str = "admin", password: str = "secret") -> AppConfig:
+    return AppConfig(
+        dashboard=DashboardConfig(
+            title="Test Dashboard",
+            auth_enabled=True,
+            username=username,
+            password=password,
+        )
+    )
+
+
 def test_dashboard_api_returns_read_only_snapshot() -> None:
     app = create_app(
         config=AppConfig(dashboard=DashboardConfig(title="Test Dashboard")),
@@ -101,6 +120,63 @@ def test_dashboard_api_returns_read_only_snapshot() -> None:
     assert payload["portfolio"]["equity"] == 100_000
     assert payload["positions"][0]["symbol"] == "SPY"
     assert payload["signals"][0]["score"] == 100
+
+
+def test_dashboard_auth_rejects_unauthenticated_page_and_snapshot() -> None:
+    app = create_app(config=_auth_config(), state_manager=_state_manager())
+    client = TestClient(app)
+
+    page_response = client.get("/")
+    snapshot_response = client.get("/api/snapshot")
+
+    assert page_response.status_code == 401
+    assert snapshot_response.status_code == 401
+    assert page_response.headers["www-authenticate"] == 'Basic realm="Intraday Confluence Dashboard"'
+
+
+def test_dashboard_auth_allows_valid_basic_credentials() -> None:
+    app = create_app(config=_auth_config(), state_manager=_state_manager())
+    client = TestClient(app)
+
+    page_response = client.get("/", headers=_auth_header())
+    snapshot_response = client.get("/api/snapshot", headers=_auth_header())
+
+    assert page_response.status_code == 200
+    assert snapshot_response.status_code == 200
+    assert snapshot_response.json()["portfolio"]["cash"] == 50_000
+
+
+def test_dashboard_auth_rejects_invalid_credentials() -> None:
+    app = create_app(config=_auth_config(), state_manager=_state_manager())
+    client = TestClient(app)
+
+    response = client.get("/api/snapshot", headers=_auth_header(password="wrong"))
+
+    assert response.status_code == 401
+
+
+def test_dashboard_auth_fails_closed_when_credentials_missing() -> None:
+    app = create_app(
+        config=AppConfig(dashboard=DashboardConfig(auth_enabled=True)),
+        state_manager=_state_manager(),
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/snapshot", headers=_auth_header())
+
+    assert response.status_code == 401
+
+
+def test_healthz_stays_public_and_non_sensitive_with_auth_enabled() -> None:
+    app = create_app(config=_auth_config(), state_manager=_state_manager())
+    client = TestClient(app)
+
+    response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert "portfolio" not in response.text
+    assert "cash" not in response.text
 
 
 def test_dashboard_api_exposes_expected_read_only_routes() -> None:
@@ -141,6 +217,25 @@ def test_dashboard_websocket_sends_initial_snapshot() -> None:
         payload = websocket.receive_json()
 
     assert payload["health"]["status"] == "ok"
+    assert payload["portfolio"]["cash"] == 50_000
+
+
+def test_dashboard_websocket_rejects_unauthenticated_connection() -> None:
+    app = create_app(config=_auth_config(), state_manager=_state_manager())
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws/dashboard"):
+            pass
+
+
+def test_dashboard_websocket_allows_valid_basic_credentials() -> None:
+    app = create_app(config=_auth_config(), state_manager=_state_manager())
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/dashboard", headers=_auth_header()) as websocket:
+        payload = websocket.receive_json()
+
     assert payload["portfolio"]["cash"] == 50_000
 
 

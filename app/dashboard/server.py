@@ -14,6 +14,12 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import AppConfig, load_config
 from app.dashboard.api import router as api_router
+from app.dashboard.auth import (
+    protected_http_path,
+    request_is_authorized,
+    unauthorized_response,
+    websocket_is_authorized,
+)
 from app.dashboard.schemas import HealthStatus
 from app.dashboard.state_manager import DashboardStateManager
 from app.dashboard.websocket_manager import WebSocketManager
@@ -52,6 +58,14 @@ def create_app(
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=TEMPLATES_DIR)
     app.include_router(api_router)
+
+    @app.middleware("http")
+    async def require_dashboard_auth(request: Request, call_next):
+        """Protect dashboard and account data routes with Basic Auth when enabled."""
+
+        if protected_http_path(request.url.path) and not request_is_authorized(request, app_config.dashboard):
+            return unauthorized_response()
+        return await call_next(request)
 
     @app.on_event("startup")
     async def start_alpaca_sync() -> None:
@@ -98,9 +112,19 @@ def create_app(
             },
         )
 
+    @app.get("/healthz")
+    async def healthz() -> dict[str, str]:
+        """Return non-sensitive service health for Railway checks."""
+
+        return {"status": "ok"}
+
     @app.websocket("/ws/dashboard")
     async def dashboard_websocket(websocket: WebSocket) -> None:
         """Stream dashboard snapshots over a read-only websocket."""
+
+        if not websocket_is_authorized(websocket, app_config.dashboard):
+            await websocket.close(code=1008)
+            return
 
         manager: WebSocketManager = app.state.websocket_manager
         await manager.connect(websocket)

@@ -51,6 +51,9 @@ SQLITE_PATH=/app/data/trading_bot.sqlite3
 ALPACA_SYNC_ENABLED=true
 ALPACA_SYNC_REFRESH_SECONDS=30
 DASHBOARD_REFRESH_SECONDS=5
+DASHBOARD_AUTH_ENABLED=true
+DASHBOARD_USERNAME=<your username>
+DASHBOARD_PASSWORD=<strong password>
 LOG_LEVEL=INFO
 LOG_FILE_PATH=logs/trading_bot.log
 ```
@@ -75,17 +78,35 @@ ALPACA_SYNC_PORTFOLIO_HISTORY_DAYS=30
 Railway health checks use:
 
 ```text
-/api/snapshot
+/healthz
 ```
 
 After deploy:
 
 1. Open the Railway-generated URL.
-2. Confirm the dashboard loads.
-3. Confirm `/api/snapshot` returns `200`.
-4. Confirm the dashboard shows Alpaca paper cash, equity, buying power, positions, and recent orders.
-5. Confirm Railway logs show `Alpaca paper account sync completed.`
-6. Confirm logs never show live trading enabled.
+2. Confirm the browser asks for your dashboard username and password.
+3. Confirm the dashboard loads after login.
+4. Confirm `/healthz` returns `200` without credentials.
+5. Confirm `/api/snapshot` returns `401` without credentials.
+6. Confirm `/api/snapshot` returns account data with credentials.
+7. Confirm the dashboard shows Alpaca paper cash, equity, buying power, positions, and recent orders.
+8. Confirm Railway logs show `Alpaca paper account sync completed.`
+9. Confirm logs never show live trading enabled.
+
+Example credentialed snapshot check:
+
+```bash
+curl -u "$DASHBOARD_USERNAME:$DASHBOARD_PASSWORD" \
+  https://your-railway-url/api/snapshot
+```
+
+The unauthenticated snapshot check should be rejected:
+
+```bash
+curl -i https://your-railway-url/api/snapshot
+```
+
+It should return `401 Unauthorized`.
 
 For local Docker smoke testing:
 
@@ -98,17 +119,20 @@ docker run --rm -p 8000:8000 \
   -e LIVE_TRADING=false \
   -e SQLITE_PATH=/app/data/trading_bot.sqlite3 \
   -e ALPACA_SYNC_ENABLED=false \
+  -e DASHBOARD_AUTH_ENABLED=true \
+  -e DASHBOARD_USERNAME=admin \
+  -e DASHBOARD_PASSWORD=change-me-before-deploy \
   intraday-confluence-trading-bot
 ```
 
 Then open:
 
 ```text
-http://127.0.0.1:8000/api/snapshot
+http://127.0.0.1:8000/
 ```
 
 ## 6. Security Notes
 
-This deployment uses Railway's generated URL for development. Anyone with that URL may view dashboard data, including cash, positions, and trade history.
+This deployment uses HTTP Basic Auth for one shared dashboard login. Use a long, unique password and store it only in Railway variables.
 
-Before sharing the dashboard URL or using this beyond development, add authentication or network-level access control.
+Before sharing the dashboard URL or using this beyond development, consider adding a stronger authentication provider or network-level access control.

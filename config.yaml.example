@@ -35,6 +35,9 @@ dashboard:
   port: 8000
   refresh_seconds: 5
   title: Intraday Confluence Bot
+  auth_enabled: false
+  username: ""
+  password: ""
 
 alerts:
   enabled: false

@@ -41,6 +41,20 @@ trading:
     assert config.trading.max_trades_per_day == 3
 
 
+def test_dashboard_auth_environment_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("DASHBOARD_AUTH_ENABLED", "true")
+    monkeypatch.setenv("DASHBOARD_USERNAME", "admin")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "secret")
+
+    config = load_config(config_path)
+
+    assert config.dashboard.auth_enabled is True
+    assert config.dashboard.username == "admin"
+    assert config.dashboard.password == "secret"
+
+
 def test_live_trading_requires_explicit_non_paper_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text("{}", encoding="utf-8")
