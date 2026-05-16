@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>{{ title }}</h1>
+        <p class="subtitle">Paper monitoring</p>
+      </div>
+      <div class="status-strip">
+        <span id="connection-state" class="status-pill muted">Connecting</span>
+        <span class="status-pill">Read-only</span>
+      </div>
+    </header>
+    <main class="page-shell">
+      {% block content %}{% endblock %}
+    </main>
+    <script>
+      window.DASHBOARD_REFRESH_SECONDS = {{ refresh_seconds }};
+    </script>
+    <script src="/static/js/dashboard.js"></script>
+  </body>
+</html>

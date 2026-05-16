@@ -1,0 +1,104 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<section class="metric-grid" aria-label="Portfolio summary">
+  <article class="metric-panel">
+    <span>Equity</span>
+    <strong id="portfolio-equity">$0.00</strong>
+  </article>
+  <article class="metric-panel">
+    <span>Cash</span>
+    <strong id="portfolio-cash">$0.00</strong>
+  </article>
+  <article class="metric-panel">
+    <span>Buying Power</span>
+    <strong id="portfolio-buying-power">$0.00</strong>
+  </article>
+  <article class="metric-panel">
+    <span>Daily P&amp;L</span>
+    <strong id="portfolio-daily-pl">$0.00</strong>
+  </article>
+</section>
+
+<section class="dashboard-grid">
+  <section class="panel span-2">
+    <div class="panel-header">
+      <h2>Open Positions</h2>
+      <span id="positions-count" class="count">0</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Qty</th>
+            <th>Avg</th>
+            <th>Last</th>
+            <th>Value</th>
+            <th>Unrealized</th>
+          </tr>
+        </thead>
+        <tbody id="positions-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>System Health</h2>
+      <span id="health-status" class="count">ok</span>
+    </div>
+    <dl class="health-list">
+      <div><dt>Environment</dt><dd id="health-env">development</dd></div>
+      <div><dt>Paper</dt><dd id="health-paper">true</dd></div>
+      <div><dt>Live</dt><dd id="health-live">false</dd></div>
+      <div><dt>Updated</dt><dd id="health-updated">-</dd></div>
+    </dl>
+  </section>
+
+  <section class="panel span-2">
+    <div class="panel-header">
+      <h2>Live Signals</h2>
+      <span id="signals-count" class="count">0</span>
+    </div>
+    <div id="signals-list" class="signal-list"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Backtest Analytics</h2>
+    </div>
+    <div class="analytics-grid">
+      <div><span>Win Rate</span><strong id="bt-win-rate">0.00%</strong></div>
+      <div><span>Profit Factor</span><strong id="bt-profit-factor">0.00</strong></div>
+      <div><span>Drawdown</span><strong id="bt-drawdown">0.00%</strong></div>
+      <div><span>Sharpe</span><strong id="bt-sharpe">0.00</strong></div>
+      <div><span>Expectancy</span><strong id="bt-expectancy">$0.00</strong></div>
+      <div><span>Trades</span><strong id="bt-trades">0</strong></div>
+    </div>
+  </section>
+
+  <section class="panel span-3">
+    <div class="panel-header">
+      <h2>Trade History</h2>
+      <span id="trades-count" class="count">0</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>Realized</th>
+            <th>Closed</th>
+          </tr>
+        </thead>
+        <tbody id="trades-body"></tbody>
+      </table>
+    </div>
+  </section>
+</section>
+{% endblock %}

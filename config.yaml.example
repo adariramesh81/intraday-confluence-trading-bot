@@ -1,0 +1,58 @@
+app:
+  env: development
+
+logging:
+  level: INFO
+  file_path: logs/trading_bot.log
+  max_bytes: 10485760
+  backup_count: 5
+
+alpaca:
+  api_key: ""
+  secret_key: ""
+  paper: true
+  paper_base_url: https://paper-api.alpaca.markets
+  live_base_url: https://api.alpaca.markets
+
+trading:
+  live_trading: false
+  default_symbol: SPY
+  max_trades_per_day: 3
+  risk_per_trade: 0.01
+
+market_data:
+  source: alpaca
+  default_timeframe: 1Min
+  feed: iex
+  adjustment: raw
+  timezone: America/New_York
+  retry_attempts: 3
+  retry_backoff_seconds: 1.0
+  timeout_seconds: 30
+
+dashboard:
+  host: 127.0.0.1
+  port: 8000
+  refresh_seconds: 5
+  title: Intraday Confluence Bot
+
+alerts:
+  enabled: false
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+  email_enabled: false
+  smtp_host: ""
+  smtp_port: 587
+  smtp_username: ""
+  smtp_password: ""
+  email_from: ""
+  email_to: ""
+
+storage:
+  sqlite_path: data/trading_bot.sqlite3
+
+alpaca_sync:
+  enabled: true
+  refresh_seconds: 30
+  order_limit: 500
+  portfolio_history_days: 30

@@ -1,0 +1,27 @@
+services:
+  trading-bot:
+    build: .
+    container_name: intraday-confluence-trading-bot
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE_PATH: ${LOG_FILE_PATH:-logs/trading_bot.log}
+      ALPACA_API_KEY: ${ALPACA_API_KEY:-}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
+      ALPACA_PAPER: ${ALPACA_PAPER:-true}
+      LIVE_TRADING: ${LIVE_TRADING:-false}
+      DEFAULT_SYMBOL: ${DEFAULT_SYMBOL:-SPY}
+      MAX_TRADES_PER_DAY: ${MAX_TRADES_PER_DAY:-3}
+      RISK_PER_TRADE: ${RISK_PER_TRADE:-0.01}
+      MARKET_DATA_SOURCE: ${MARKET_DATA_SOURCE:-alpaca}
+      MARKET_DATA_TIMEFRAME: ${MARKET_DATA_TIMEFRAME:-1Min}
+      MARKET_DATA_FEED: ${MARKET_DATA_FEED:-iex}
+      MARKET_DATA_ADJUSTMENT: ${MARKET_DATA_ADJUSTMENT:-raw}
+      MARKET_DATA_TIMEZONE: ${MARKET_DATA_TIMEZONE:-America/New_York}
+      MARKET_DATA_RETRY_ATTEMPTS: ${MARKET_DATA_RETRY_ATTEMPTS:-3}
+      MARKET_DATA_RETRY_BACKOFF_SECONDS: ${MARKET_DATA_RETRY_BACKOFF_SECONDS:-1.0}
+      MARKET_DATA_TIMEOUT_SECONDS: ${MARKET_DATA_TIMEOUT_SECONDS:-30}
+    volumes:
+      - ./logs:/app/logs
+      - ./config.yaml:/app/config.yaml:ro
+    restart: on-failure
