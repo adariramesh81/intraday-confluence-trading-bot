@@ -187,6 +187,23 @@ def test_login_sets_session_cookie_and_allows_dashboard_access(tmp_path: Path) -
     assert snapshot_response.json()["portfolio"]["cash"] == 50_000
 
 
+def test_startup_bootstrap_admin_password_allows_login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DASHBOARD_ADMIN_BOOTSTRAP_PASSWORD", "bootstrap-secret")
+    config = _auth_config(tmp_path)
+    store = _user_store(config)
+    app = create_app(config=config, state_manager=_state_manager(), user_store=store)
+    client = TestClient(app)
+
+    login_response = _login(client, password="bootstrap-secret")
+    user = store.get_user("admin@example.com")
+
+    assert login_response.status_code == 303
+    assert login_response.headers["location"] == "/"
+    assert user.is_admin is True
+    assert user.is_active is True
+    assert user.temporary_password is False
+
+
 def test_login_rejects_invalid_credentials_without_session_cookie(tmp_path: Path) -> None:
     client, _ = _auth_app(tmp_path)
 

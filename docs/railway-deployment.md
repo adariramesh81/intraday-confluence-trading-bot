@@ -107,6 +107,14 @@ python -m app.dashboard.user_admin create-admin --email you@example.com
 
 The command prints a temporary password once. After signing in, change the password and then use **Admin** -> **Dashboard Users** to create friend accounts. Friend accounts receive generated temporary passwords that you copy and send manually.
 
+If Railway SSH is unavailable, you can set this deploy-only variable once:
+
+```env
+DASHBOARD_ADMIN_BOOTSTRAP_PASSWORD=<temporary admin password>
+```
+
+Redeploy the service, sign in with `DASHBOARD_ADMIN_EMAIL` and that password, then remove `DASHBOARD_ADMIN_BOOTSTRAP_PASSWORD` from Railway variables and redeploy again. The password is hashed into SQLite and is never logged, but the variable should not remain active after first use.
+
 The unauthenticated snapshot check should be rejected:
 
 ```bash

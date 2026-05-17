@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 from contextlib import suppress
 from pathlib import Path
@@ -73,6 +74,17 @@ def create_app(
     if app_config.dashboard.auth_enabled:
         app.state.dashboard_user_store.initialize()
         if app_config.dashboard.admin_email:
+            bootstrap_password = os.getenv("DASHBOARD_ADMIN_BOOTSTRAP_PASSWORD", "")
+            if bootstrap_password:
+                _set_bootstrap_admin_password(
+                    app.state.dashboard_user_store,
+                    app_config.dashboard.admin_email,
+                    bootstrap_password,
+                )
+                logger.warning(
+                    "Dashboard admin password was set from DASHBOARD_ADMIN_BOOTSTRAP_PASSWORD. "
+                    "Remove this variable after confirming login."
+                )
             created_admin = app.state.dashboard_user_store.ensure_admin_user(app_config.dashboard.admin_email)
             if created_admin:
                 logger.warning(
@@ -353,6 +365,26 @@ def _session_email(request: Request) -> str:
 def _session_is_admin(request: Request) -> bool:
     session = getattr(request.state, "dashboard_session", None)
     return bool(getattr(session, "is_admin", False))
+
+
+def _set_bootstrap_admin_password(
+    user_store: DashboardUserStore,
+    email: str,
+    password: str,
+) -> None:
+    normalized_email = email.strip().lower()
+    existing = user_store.get_user(normalized_email)
+    if existing is None:
+        user_store.create_user(
+            normalized_email,
+            password,
+            is_admin=True,
+            temporary_password=False,
+        )
+        return
+    user_store.ensure_admin_user(normalized_email)
+    user_store.change_password(normalized_email, password)
+    user_store.set_active(normalized_email, True)
 
 
 async def _alpaca_sync_loop(
