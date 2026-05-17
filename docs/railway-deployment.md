@@ -52,9 +52,8 @@ ALPACA_SYNC_ENABLED=true
 ALPACA_SYNC_REFRESH_SECONDS=30
 DASHBOARD_REFRESH_SECONDS=5
 DASHBOARD_AUTH_ENABLED=true
-DASHBOARD_USERNAME=<your username>
-DASHBOARD_PASSWORD=<strong password>
 DASHBOARD_SESSION_SECRET=<long random value>
+DASHBOARD_ADMIN_EMAIL=<your email>
 LOG_LEVEL=INFO
 LOG_FILE_PATH=logs/trading_bot.log
 ```
@@ -86,7 +85,7 @@ After deploy:
 
 1. Open the Railway-generated URL.
 2. Confirm `/` redirects to the app login page.
-3. Confirm the dashboard loads after signing in.
+3. Confirm the dashboard loads after signing in with a dashboard user account.
 4. Confirm `/healthz` returns `200` without credentials.
 5. Confirm `/api/snapshot` returns `401` before signing in.
 6. Confirm `/api/snapshot` returns account data after signing in.
@@ -99,6 +98,14 @@ Generate a session secret locally with:
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
+
+Create or reset the initial admin account with:
+
+```bash
+python -m app.dashboard.user_admin create-admin --email you@example.com
+```
+
+The command prints a temporary password once. After signing in, change the password and then use **Admin** -> **Dashboard Users** to create friend accounts. Friend accounts receive generated temporary passwords that you copy and send manually.
 
 The unauthenticated snapshot check should be rejected:
 
@@ -120,9 +127,8 @@ docker run --rm -p 8000:8000 \
   -e SQLITE_PATH=/app/data/trading_bot.sqlite3 \
   -e ALPACA_SYNC_ENABLED=false \
   -e DASHBOARD_AUTH_ENABLED=true \
-  -e DASHBOARD_USERNAME=admin \
-  -e DASHBOARD_PASSWORD=change-me-before-deploy \
   -e DASHBOARD_SESSION_SECRET=local-dev-session-secret \
+  -e DASHBOARD_ADMIN_EMAIL=you@example.com \
   intraday-confluence-trading-bot
 ```
 
@@ -134,6 +140,6 @@ http://127.0.0.1:8000/
 
 ## 6. Security Notes
 
-This deployment uses an app login page with one shared dashboard account. Use a long, unique password and a random `DASHBOARD_SESSION_SECRET`; store both only in Railway variables.
+This deployment uses an app login page with SQLite-backed dashboard user accounts. Use a random `DASHBOARD_SESSION_SECRET` and store it only in Railway variables.
 
 Before sharing the dashboard URL or using this beyond development, consider adding a stronger authentication provider or network-level access control.

@@ -36,9 +36,8 @@ dashboard:
   refresh_seconds: 5
   title: Intraday Confluence Bot
   auth_enabled: false
-  username: ""
-  password: ""
   session_secret: ""
+  admin_email: ""
 
 alerts:
   enabled: false

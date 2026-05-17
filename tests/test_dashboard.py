@@ -1,12 +1,14 @@
 import json
+import re
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from app.config import AlertConfig, AppConfig, DashboardConfig
+from app.config import AlertConfig, AppConfig, DashboardConfig, StorageConfig
 from app.dashboard.schemas import (
     BacktestMetricsView,
     HealthStatus,
@@ -17,6 +19,7 @@ from app.dashboard.schemas import (
 )
 from app.dashboard.server import create_app
 from app.dashboard.state_manager import DashboardStateManager
+from app.dashboard.user_store import DashboardUserStore
 from app.utils.alert_manager import AlertManager
 
 
@@ -89,22 +92,42 @@ def _state_manager() -> DashboardStateManager:
     return state
 
 
-def _auth_config(username: str = "admin", password: str = "secret") -> AppConfig:
+def _auth_config(tmp_path: Path) -> AppConfig:
     return AppConfig(
         dashboard=DashboardConfig(
             title="Test Dashboard",
             auth_enabled=True,
-            username=username,
-            password=password,
             session_secret="test-session-secret",
-        )
+            admin_email="admin@example.com",
+        ),
+        storage=StorageConfig(sqlite_path=tmp_path / "dashboard.sqlite3"),
     )
 
 
-def _login(client: TestClient, username: str = "admin", password: str = "secret"):
+def _user_store(config: AppConfig) -> DashboardUserStore:
+    store = DashboardUserStore(config.storage.sqlite_path)
+    store.initialize()
+    return store
+
+
+def _auth_app(
+    tmp_path: Path,
+    email: str = "admin@example.com",
+    password: str = "secret-password",
+    is_admin: bool = True,
+    temporary_password: bool = False,
+) -> tuple[TestClient, DashboardUserStore]:
+    config = _auth_config(tmp_path)
+    store = _user_store(config)
+    store.create_user(email, password, is_admin=is_admin, temporary_password=temporary_password)
+    app = create_app(config=config, state_manager=_state_manager(), user_store=store)
+    return TestClient(app), store
+
+
+def _login(client: TestClient, email: str = "admin@example.com", password: str = "secret-password"):
     return client.post(
         "/login",
-        data={"username": username, "password": password},
+        data={"email": email, "password": password},
         follow_redirects=False,
     )
 
@@ -125,9 +148,8 @@ def test_dashboard_api_returns_read_only_snapshot() -> None:
     assert payload["signals"][0]["score"] == 100
 
 
-def test_dashboard_auth_redirects_unauthenticated_page_and_blocks_snapshot() -> None:
-    app = create_app(config=_auth_config(), state_manager=_state_manager())
-    client = TestClient(app)
+def test_dashboard_auth_redirects_unauthenticated_page_and_blocks_snapshot(tmp_path: Path) -> None:
+    client, _ = _auth_app(tmp_path)
 
     page_response = client.get("/", follow_redirects=False)
     snapshot_response = client.get("/api/snapshot")
@@ -138,21 +160,19 @@ def test_dashboard_auth_redirects_unauthenticated_page_and_blocks_snapshot() -> 
     assert snapshot_response.json()["detail"] == "Authentication required."
 
 
-def test_login_page_renders_before_dashboard() -> None:
-    app = create_app(config=_auth_config(), state_manager=_state_manager())
-    client = TestClient(app)
+def test_login_page_renders_before_dashboard(tmp_path: Path) -> None:
+    client, _ = _auth_app(tmp_path)
 
     response = client.get("/login")
 
     assert response.status_code == 200
     assert "Sign in to view the read-only trading dashboard." in response.text
-    assert 'name="username"' in response.text
+    assert 'name="email"' in response.text
     assert 'name="password"' in response.text
 
 
-def test_login_sets_session_cookie_and_allows_dashboard_access() -> None:
-    app = create_app(config=_auth_config(), state_manager=_state_manager())
-    client = TestClient(app)
+def test_login_sets_session_cookie_and_allows_dashboard_access(tmp_path: Path) -> None:
+    client, _ = _auth_app(tmp_path)
 
     login_response = _login(client)
     page_response = client.get("/")
@@ -167,9 +187,8 @@ def test_login_sets_session_cookie_and_allows_dashboard_access() -> None:
     assert snapshot_response.json()["portfolio"]["cash"] == 50_000
 
 
-def test_login_rejects_invalid_credentials_without_session_cookie() -> None:
-    app = create_app(config=_auth_config(), state_manager=_state_manager())
-    client = TestClient(app)
+def test_login_rejects_invalid_credentials_without_session_cookie(tmp_path: Path) -> None:
+    client, _ = _auth_app(tmp_path)
 
     response = _login(client, password="wrong")
 
@@ -178,9 +197,43 @@ def test_login_rejects_invalid_credentials_without_session_cookie() -> None:
     assert "dashboard_session=" not in response.headers.get("set-cookie", "")
 
 
-def test_logout_clears_session_and_returns_to_login() -> None:
-    app = create_app(config=_auth_config(), state_manager=_state_manager())
-    client = TestClient(app)
+def test_user_store_hashes_passwords_and_blocks_inactive_users(tmp_path: Path) -> None:
+    config = _auth_config(tmp_path)
+    store = _user_store(config)
+
+    user = store.create_user("friend@example.com", "temporary-secret", temporary_password=True)
+    store.set_active(user.email, False)
+
+    assert "temporary-secret" not in user.password_hash
+    assert store.authenticate("friend@example.com", "temporary-secret") is None
+
+
+def test_temporary_password_user_must_change_password(tmp_path: Path) -> None:
+    client, store = _auth_app(tmp_path, temporary_password=True)
+
+    login_response = _login(client)
+    dashboard_response = client.get("/", follow_redirects=False)
+    blocked_snapshot = client.get("/api/snapshot")
+    change_response = client.post(
+        "/change-password",
+        data={"password": "new-secret-password", "confirm_password": "new-secret-password"},
+        follow_redirects=False,
+    )
+    dashboard_after_change = client.get("/")
+
+    assert login_response.status_code == 303
+    assert login_response.headers["location"] == "/change-password"
+    assert dashboard_response.status_code == 303
+    assert dashboard_response.headers["location"] == "/change-password"
+    assert blocked_snapshot.status_code == 403
+    assert change_response.status_code == 303
+    assert change_response.headers["location"] == "/"
+    assert store.get_user("admin@example.com").temporary_password is False
+    assert dashboard_after_change.status_code == 200
+
+
+def test_logout_clears_session_and_returns_to_login(tmp_path: Path) -> None:
+    client, _ = _auth_app(tmp_path)
 
     _login(client)
     logout_response = client.get("/logout", follow_redirects=False)
@@ -205,9 +258,8 @@ def test_dashboard_auth_fails_closed_when_credentials_missing() -> None:
     assert response.status_code == 401
 
 
-def test_healthz_stays_public_and_non_sensitive_with_auth_enabled() -> None:
-    app = create_app(config=_auth_config(), state_manager=_state_manager())
-    client = TestClient(app)
+def test_healthz_stays_public_and_non_sensitive_with_auth_enabled(tmp_path: Path) -> None:
+    client, _ = _auth_app(tmp_path)
 
     response = client.get("/healthz")
 
@@ -215,6 +267,59 @@ def test_healthz_stays_public_and_non_sensitive_with_auth_enabled() -> None:
     assert response.json() == {"status": "ok"}
     assert "portfolio" not in response.text
     assert "cash" not in response.text
+
+
+def test_admin_can_manage_dashboard_users(tmp_path: Path) -> None:
+    client, store = _auth_app(tmp_path)
+
+    _login(client)
+    page = client.get("/admin/users")
+    create_response = client.post(
+        "/admin/users",
+        data={"action": "create", "email": "friend@example.com"},
+    )
+    generated_match = re.search(r"<strong>([^<]+)</strong>", create_response.text)
+    assert generated_match is not None
+    assert store.authenticate("friend@example.com", generated_match.group(1)) is not None
+    reset_response = client.post(
+        "/admin/users",
+        data={"action": "reset", "email": "friend@example.com"},
+    )
+    deactivate_response = client.post(
+        "/admin/users",
+        data={"action": "deactivate", "email": "friend@example.com"},
+    )
+    inactive_user = store.get_user("friend@example.com")
+    activate_response = client.post(
+        "/admin/users",
+        data={"action": "activate", "email": "friend@example.com"},
+    )
+
+    assert page.status_code == 200
+    assert "Dashboard Users" in page.text
+    assert create_response.status_code == 200
+    assert "Temporary Password" in create_response.text
+    assert "friend@example.com" in create_response.text
+    assert reset_response.status_code == 200
+    assert "Temporary Password" in reset_response.text
+    assert deactivate_response.status_code == 200
+    assert inactive_user.is_active is False
+    assert activate_response.status_code == 200
+    assert store.get_user("friend@example.com").is_active is True
+
+
+def test_non_admin_cannot_access_user_admin(tmp_path: Path) -> None:
+    client, _ = _auth_app(
+        tmp_path,
+        email="friend@example.com",
+        password="friend-secret",
+        is_admin=False,
+    )
+
+    _login(client, email="friend@example.com", password="friend-secret")
+    response = client.get("/admin/users")
+
+    assert response.status_code == 403
 
 
 def test_dashboard_api_exposes_expected_read_only_routes() -> None:
@@ -258,18 +363,16 @@ def test_dashboard_websocket_sends_initial_snapshot() -> None:
     assert payload["portfolio"]["cash"] == 50_000
 
 
-def test_dashboard_websocket_rejects_unauthenticated_connection() -> None:
-    app = create_app(config=_auth_config(), state_manager=_state_manager())
-    client = TestClient(app)
+def test_dashboard_websocket_rejects_unauthenticated_connection(tmp_path: Path) -> None:
+    client, _ = _auth_app(tmp_path)
 
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws/dashboard"):
             pass
 
 
-def test_dashboard_websocket_allows_valid_session_cookie() -> None:
-    app = create_app(config=_auth_config(), state_manager=_state_manager())
-    client = TestClient(app)
+def test_dashboard_websocket_allows_valid_session_cookie(tmp_path: Path) -> None:
+    client, _ = _auth_app(tmp_path)
 
     _login(client)
     with client.websocket_connect("/ws/dashboard") as websocket:

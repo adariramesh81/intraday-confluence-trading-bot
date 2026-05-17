@@ -381,6 +381,91 @@ dd {
   background: #0d625c;
 }
 
+.admin-panel {
+  margin-bottom: 16px;
+}
+
+.admin-content {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.admin-message {
+  color: var(--positive);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.temporary-password {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #b7d7d2;
+  border-radius: 8px;
+  background: #e8f6f3;
+}
+
+.temporary-password span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.temporary-password strong {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.admin-create-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.admin-create-form label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-create-form input {
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.admin-create-form button,
+.inline-actions button {
+  min-height: 34px;
+  border: 1px solid #b7d7d2;
+  border-radius: 6px;
+  background: #e8f6f3;
+  color: #0e5f59;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-create-form button {
+  min-width: 120px;
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 @media (max-width: 980px) {
   .metric-grid,
   .dashboard-grid,
@@ -407,5 +492,9 @@ dd {
 
   .metric-panel strong {
     font-size: 20px;
+  }
+
+  .admin-create-form {
+    grid-template-columns: 1fr;
   }
 }

@@ -15,6 +15,9 @@
       <div class="status-strip">
         <span id="connection-state" class="status-pill muted">Connecting</span>
         <span class="status-pill">Read-only</span>
+        {% if user_is_admin %}
+        <a class="status-pill logout-link" href="/admin/users">Admin</a>
+        {% endif %}
         {% if auth_enabled %}
         <a class="status-pill logout-link" href="/logout">Logout</a>
         {% endif %}

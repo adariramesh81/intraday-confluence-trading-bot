@@ -7,14 +7,26 @@ import hashlib
 import hmac
 import json
 import secrets
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Request, WebSocket
 
 from app.config import DashboardConfig
+from app.dashboard.user_store import DashboardUser, DashboardUserStore
 
 SESSION_COOKIE_NAME = "dashboard_session"
 AUTH_REQUIRED_MESSAGE = "Authentication required."
+PASSWORD_CHANGE_REQUIRED_MESSAGE = "Password change required."
+
+
+@dataclass(frozen=True)
+class DashboardSession:
+    """Authenticated dashboard session payload."""
+
+    email: str
+    is_admin: bool
+    temporary_password: bool
 
 
 def public_http_path(path: str) -> bool:
@@ -26,62 +38,79 @@ def public_http_path(path: str) -> bool:
 def protected_http_path(path: str) -> bool:
     """Return whether an HTTP path should require a dashboard session."""
 
-    return path == "/" or path.startswith("/api/")
+    return path == "/" or path == "/change-password" or path.startswith("/api/") or path.startswith("/admin/")
 
 
 def auth_is_configured(config: DashboardConfig) -> bool:
     """Return whether dashboard auth has the required secret material."""
 
-    return bool(config.auth_enabled and config.username and config.password and config.session_secret)
+    return bool(config.auth_enabled and config.session_secret)
 
 
-def credentials_are_valid(username: str, password: str, config: DashboardConfig) -> bool:
-    """Validate submitted credentials using constant-time comparison."""
-
-    if not auth_is_configured(config):
-        return False
-    return secrets.compare_digest(username, config.username) and secrets.compare_digest(password, config.password)
-
-
-def request_is_authorized(request: Request, config: DashboardConfig) -> bool:
-    """Return whether an HTTP request has a valid dashboard session."""
+def get_request_session(
+    request: Request,
+    config: DashboardConfig,
+    user_store: DashboardUserStore,
+) -> DashboardSession | None:
+    """Return a valid dashboard session for an HTTP request."""
 
     if not config.auth_enabled:
-        return True
-    return session_cookie_is_valid(request.cookies.get(SESSION_COOKIE_NAME), config)
+        return DashboardSession(email="", is_admin=True, temporary_password=False)
+    return session_from_cookie(request.cookies.get(SESSION_COOKIE_NAME), config, user_store)
 
 
-def websocket_is_authorized(websocket: WebSocket, config: DashboardConfig) -> bool:
-    """Return whether a websocket handshake has a valid dashboard session."""
+def get_websocket_session(
+    websocket: WebSocket,
+    config: DashboardConfig,
+    user_store: DashboardUserStore,
+) -> DashboardSession | None:
+    """Return a valid dashboard session for a websocket handshake."""
 
     if not config.auth_enabled:
-        return True
-    return session_cookie_is_valid(websocket.cookies.get(SESSION_COOKIE_NAME), config)
+        return DashboardSession(email="", is_admin=True, temporary_password=False)
+    return session_from_cookie(websocket.cookies.get(SESSION_COOKIE_NAME), config, user_store)
 
 
-def create_session_cookie_value(config: DashboardConfig) -> str:
-    """Create a signed browser-session cookie value for the configured dashboard user."""
+def create_session_cookie_value(user: DashboardUser, config: DashboardConfig) -> str:
+    """Create a signed browser-session cookie value for a dashboard user."""
 
     if not auth_is_configured(config):
         return ""
-    payload = _base64_urlsafe_json({"username": config.username})
+    payload = _base64_urlsafe_json(
+        {
+            "email": user.email,
+            "is_admin": user.is_admin,
+            "temporary_password": user.temporary_password,
+        }
+    )
     signature = _signature(payload, config.session_secret)
     return f"{payload}.{signature}"
 
 
-def session_cookie_is_valid(cookie_value: str | None, config: DashboardConfig) -> bool:
-    """Validate the signed dashboard session cookie."""
+def session_from_cookie(
+    cookie_value: str | None,
+    config: DashboardConfig,
+    user_store: DashboardUserStore,
+) -> DashboardSession | None:
+    """Validate and load a dashboard session from a signed cookie."""
 
     if not auth_is_configured(config) or not cookie_value:
-        return False
+        return None
     payload, separator, signature = cookie_value.partition(".")
     if not separator or not payload or not signature:
-        return False
+        return None
     expected_signature = _signature(payload, config.session_secret)
     if not secrets.compare_digest(signature, expected_signature):
-        return False
+        return None
     data = _decode_base64_urlsafe_json(payload)
-    return secrets.compare_digest(str(data.get("username", "")), config.username)
+    user = user_store.get_user(str(data.get("email", "")))
+    if user is None or not user.is_active:
+        return None
+    return DashboardSession(
+        email=user.email,
+        is_admin=user.is_admin,
+        temporary_password=user.temporary_password,
+    )
 
 
 def _base64_urlsafe_json(data: dict[str, Any]) -> str:
