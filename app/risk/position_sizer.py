@@ -25,6 +25,8 @@ def calculate_position_size(
     risk_per_share = abs(entry_price - stop_loss)
     capital_at_risk = account_equity * config.risk_per_trade
     raw_quantity = capital_at_risk / risk_per_share
+    max_notional = account_equity * config.max_position_notional_pct
+    raw_quantity = min(raw_quantity, max_notional / entry_price)
     quantity = _round_quantity(raw_quantity, config)
 
     return PositionSize(
@@ -57,5 +59,7 @@ def _validate_inputs(
         raise PositionSizingError("entry_price and stop_loss cannot be equal.")
     if not 0 < settings.risk_per_trade <= 0.01:
         raise PositionSizingError("risk_per_trade must be greater than 0 and no more than 0.01.")
+    if not 0 < settings.max_position_notional_pct <= 1:
+        raise PositionSizingError("max_position_notional_pct must be between 0 and 1.")
     if settings.quantity_precision < 0:
         raise PositionSizingError("quantity_precision cannot be negative.")

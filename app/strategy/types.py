@@ -30,6 +30,10 @@ class SignalType(str, Enum):
     NONE = "NONE"
     PULLBACK = "PULLBACK"
     BREAKOUT = "BREAKOUT"
+    MOMENTUM = "MOMENTUM"
+    MEAN_REVERSION = "MEAN_REVERSION"
+    COMPOSITE = "COMPOSITE"
+    EXIT = "EXIT"
 
 
 @dataclass(frozen=True)
@@ -38,14 +42,33 @@ class StrategySettings:
 
     fast_ema_period: int = 9
     slow_ema_period: int = 21
+    trend_ema_period: int = 20
+    ma_period: int = 50
     rsi_period: int = 14
     bollinger_period: int = 20
     bollinger_std_dev: float = 2.0
+    macd_fast_period: int = 12
+    macd_slow_period: int = 26
+    macd_signal_period: int = 9
     supertrend_atr_period: int = 10
     supertrend_multiplier: float = 3.0
     volume_average_period: int = 20
-    volume_confirmation_multiplier: float = 1.5
-    minimum_trade_score: int = 75
+    volume_confirmation_multiplier: float = 1.1
+    minimum_trade_score: int = 40
+    min_confidence: float = 0.40
+    buy_consensus_threshold: float = 0.10
+    sell_consensus_threshold: float = -0.20
+    rsi_momentum_buy_max: float = 60.0
+    rsi_oversold_threshold: float = 40.0
+    rsi_overbought_exit: float = 75.0
+    mean_reversion_exit_rsi: float = 65.0
+    mean_reversion_exit_bb_multiplier: float = 1.02
+    price_extension_ma_multiplier: float = 1.30
+    hard_take_profit_pct: float = 0.03
+    hard_stop_loss_pct: float = 0.03
+    break_even_profit_pct: float = 0.10
+    lock_profit_trigger_pct: float = 0.20
+    lock_profit_pct: float = 0.08
     pullback_tolerance_pct: float = 0.003
     rejection_wick_body_ratio: float = 0.5
     rsi_neutral_lower: float = 45.0
@@ -85,6 +108,6 @@ class StrategyDecision:
 
     @property
     def should_trade(self) -> bool:
-        """Return whether the decision represents a tradable signal."""
+        """Return whether the decision represents a long entry signal."""
 
-        return self.side in {SignalSide.BUY, SignalSide.SELL} and self.score.passed and not self.filtered_reasons
+        return self.side == SignalSide.BUY and self.score.passed and not self.filtered_reasons

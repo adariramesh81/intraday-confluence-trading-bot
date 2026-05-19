@@ -44,10 +44,24 @@ class RiskManager:
         supertrend: float | None = None,
         opposite_bollinger_band: float | None = None,
         timestamp: datetime | None = None,
+        open_positions_count: int = 0,
+        deployed_notional: float = 0.0,
+        cash: float | None = None,
+        sector_notional: float = 0.0,
     ) -> RiskDecision:
         """Return a complete risk decision for a proposed trade signal."""
 
         allowed, guard_reasons = self.drawdown_guard.can_take_trade(drawdown_state, daily_counter)
+        guard_reasons.extend(
+            self._portfolio_guard_reasons(
+                account_equity=account_equity,
+                open_positions_count=open_positions_count,
+                deployed_notional=deployed_notional,
+                cash=cash,
+                sector_notional=sector_notional,
+            )
+        )
+        allowed = not guard_reasons
         if not allowed:
             self.logger.info("Risk decision blocked by account guardrails.", extra={"reasons": guard_reasons})
             return RiskDecision(
@@ -107,6 +121,25 @@ class RiskManager:
             reasons=[],
             timestamp=timestamp,
         )
+
+    def _portfolio_guard_reasons(
+        self,
+        account_equity: float,
+        open_positions_count: int,
+        deployed_notional: float,
+        cash: float | None,
+        sector_notional: float,
+    ) -> list[str]:
+        reasons: list[str] = []
+        if open_positions_count >= self.settings.max_open_positions:
+            reasons.append("Maximum open position limit reached.")
+        if account_equity > 0 and deployed_notional / account_equity >= self.settings.max_deployed_pct:
+            reasons.append("Maximum deployed capital limit reached.")
+        if cash is not None and account_equity > 0 and cash / account_equity < self.settings.cash_reserve_pct:
+            reasons.append("Cash reserve requirement not met.")
+        if account_equity > 0 and sector_notional / account_equity >= self.settings.max_sector_pct:
+            reasons.append("Maximum sector concentration reached.")
+        return reasons
 
     def manage_open_trade_stop(
         self,

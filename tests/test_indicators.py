@@ -9,7 +9,9 @@ from app.indicators import (
     calculate_atr,
     calculate_bollinger_bands,
     calculate_ema,
+    calculate_macd,
     calculate_rsi,
+    calculate_sma,
     calculate_supertrend,
     calculate_true_range,
     calculate_vwap,
@@ -82,6 +84,24 @@ def test_add_ema_columns_flags_bullish_crossover() -> None:
 
     assert {"ema_2", "ema_3", "ema_crossover"}.issubset(result.columns)
     assert 1 in set(result["ema_crossover"])
+
+
+def test_calculate_sma_adds_expected_moving_average() -> None:
+    data = pd.DataFrame({"close": [1, 2, 3, 4, 5]})
+
+    sma = calculate_sma(data, period=3)
+
+    assert pd.isna(sma.iloc[0])
+    assert sma.iloc[-1] == pytest.approx(4)
+
+
+def test_calculate_macd_adds_bot2_columns() -> None:
+    data = pd.DataFrame({"close": list(range(1, 80))})
+
+    result = calculate_macd(data)
+
+    assert {"macd", "macd_signal", "macd_histogram", "macd_bearish_cross"}.issubset(result.columns)
+    assert result["macd"].dropna().iloc[-1] > 0
 
 
 def test_calculate_rsi_stays_between_zero_and_one_hundred() -> None:

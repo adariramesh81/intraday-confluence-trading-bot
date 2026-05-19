@@ -31,8 +31,13 @@ class RiskSettings:
     minimum_reward_r: float = 1.5
     break_even_trigger_r: float = 0.8
     trailing_stop_trigger_r: float = 1.0
-    max_daily_drawdown_pct: float = 0.03
+    max_daily_drawdown_pct: float = 0.02
     max_total_drawdown_pct: float = 0.10
+    max_position_notional_pct: float = 0.15
+    max_open_positions: int = 25
+    cash_reserve_pct: float = 0.04
+    max_deployed_pct: float = 0.96
+    max_sector_pct: float = 0.60
     allow_fractional_shares: bool = True
     quantity_precision: int = 6
 

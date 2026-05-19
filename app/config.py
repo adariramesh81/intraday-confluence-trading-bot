@@ -35,8 +35,24 @@ class TradingConfig:
 
     live_trading: bool = False
     default_symbol: str = "SPY"
+    watchlist: tuple[str, ...] = ("SPY",)
+    scan_interval_seconds: int = 60
+    strategy: str = "bot2"
     max_trades_per_day: int = 3
     risk_per_trade: float = 0.01
+
+
+@dataclass(frozen=True)
+class RiskConfig:
+    """Portfolio-level risk settings."""
+
+    max_position_notional_pct: float = 0.15
+    max_open_positions: int = 25
+    cash_reserve_pct: float = 0.04
+    max_deployed_pct: float = 0.96
+    max_daily_drawdown: float = 0.02
+    max_sector_pct: float = 0.60
+    symbol_sectors: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -107,6 +123,7 @@ class AppConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     alpaca: AlpacaConfig = field(default_factory=AlpacaConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
+    risk: RiskConfig = field(default_factory=RiskConfig)
     market_data: MarketDataConfig = field(default_factory=MarketDataConfig)
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     alerts: AlertConfig = field(default_factory=AlertConfig)
@@ -146,6 +163,7 @@ def _build_config(raw_config: Mapping[str, Any]) -> AppConfig:
     logging_config = _mapping(raw_config.get("logging"))
     alpaca_config = _mapping(raw_config.get("alpaca"))
     trading_config = _mapping(raw_config.get("trading"))
+    risk_config = _mapping(raw_config.get("risk"))
     market_data_config = _mapping(raw_config.get("market_data"))
     dashboard_config = _mapping(raw_config.get("dashboard"))
     alert_config = _mapping(raw_config.get("alerts"))
@@ -173,10 +191,33 @@ def _build_config(raw_config: Mapping[str, Any]) -> AppConfig:
             trading=TradingConfig(
                 live_trading=_as_bool(trading_config.get("live_trading", False), "trading.live_trading"),
                 default_symbol=str(trading_config.get("default_symbol", "SPY")),
+                watchlist=_as_symbol_tuple(
+                    trading_config.get("watchlist", trading_config.get("default_symbol", "SPY")),
+                    "trading.watchlist",
+                ),
+                scan_interval_seconds=_as_int(
+                    trading_config.get("scan_interval_seconds", 60), "trading.scan_interval_seconds"
+                ),
+                strategy=str(trading_config.get("strategy", "bot2")),
                 max_trades_per_day=_as_int(
                     trading_config.get("max_trades_per_day", 3), "trading.max_trades_per_day"
                 ),
                 risk_per_trade=_as_float(trading_config.get("risk_per_trade", 0.01), "trading.risk_per_trade"),
+            ),
+            risk=RiskConfig(
+                max_position_notional_pct=_as_float(
+                    risk_config.get("max_position_notional_pct", 0.15),
+                    "risk.max_position_notional_pct",
+                ),
+                max_open_positions=_as_int(risk_config.get("max_open_positions", 25), "risk.max_open_positions"),
+                cash_reserve_pct=_as_float(risk_config.get("cash_reserve_pct", 0.04), "risk.cash_reserve_pct"),
+                max_deployed_pct=_as_float(risk_config.get("max_deployed_pct", 0.96), "risk.max_deployed_pct"),
+                max_daily_drawdown=_as_float(
+                    risk_config.get("max_daily_drawdown", 0.02),
+                    "risk.max_daily_drawdown",
+                ),
+                max_sector_pct=_as_float(risk_config.get("max_sector_pct", 0.60), "risk.max_sector_pct"),
+                symbol_sectors=_as_str_mapping(risk_config.get("symbol_sectors", {}), "risk.symbol_sectors"),
             ),
             market_data=MarketDataConfig(
                 source=str(market_data_config.get("source", "alpaca")),
@@ -258,8 +299,23 @@ def _apply_environment_overrides(config: AppConfig) -> AppConfig:
     trading_config = TradingConfig(
         live_trading=_env_bool("LIVE_TRADING", config.trading.live_trading),
         default_symbol=os.getenv("DEFAULT_SYMBOL", config.trading.default_symbol),
+        watchlist=_env_symbol_tuple("TRADING_WATCHLIST", config.trading.watchlist),
+        scan_interval_seconds=_env_int("TRADING_SCAN_INTERVAL_SECONDS", config.trading.scan_interval_seconds),
+        strategy=os.getenv("TRADING_STRATEGY", config.trading.strategy),
         max_trades_per_day=_env_int("MAX_TRADES_PER_DAY", config.trading.max_trades_per_day),
         risk_per_trade=_env_float("RISK_PER_TRADE", config.trading.risk_per_trade),
+    )
+    risk_config = RiskConfig(
+        max_position_notional_pct=_env_float(
+            "RISK_MAX_POSITION_NOTIONAL_PCT",
+            config.risk.max_position_notional_pct,
+        ),
+        max_open_positions=_env_int("RISK_MAX_OPEN_POSITIONS", config.risk.max_open_positions),
+        cash_reserve_pct=_env_float("RISK_CASH_RESERVE_PCT", config.risk.cash_reserve_pct),
+        max_deployed_pct=_env_float("RISK_MAX_DEPLOYED_PCT", config.risk.max_deployed_pct),
+        max_daily_drawdown=_env_float("RISK_MAX_DAILY_DRAWDOWN", config.risk.max_daily_drawdown),
+        max_sector_pct=_env_float("RISK_MAX_SECTOR_PCT", config.risk.max_sector_pct),
+        symbol_sectors=config.risk.symbol_sectors,
     )
     market_data_config = MarketDataConfig(
         source=os.getenv("MARKET_DATA_SOURCE", config.market_data.source),
@@ -313,6 +369,7 @@ def _apply_environment_overrides(config: AppConfig) -> AppConfig:
             logging=logging_config,
             alpaca=alpaca_config,
             trading=trading_config,
+            risk=risk_config,
             market_data=market_data_config,
             dashboard=dashboard_config,
             alerts=alert_config,
@@ -329,8 +386,26 @@ def _validate_config(config: AppConfig) -> AppConfig:
         raise ConfigError("logging.backup_count cannot be negative.")
     if config.trading.max_trades_per_day <= 0:
         raise ConfigError("trading.max_trades_per_day must be greater than zero.")
+    if config.trading.scan_interval_seconds <= 0:
+        raise ConfigError("trading.scan_interval_seconds must be greater than zero.")
+    if not config.trading.watchlist:
+        raise ConfigError("trading.watchlist must contain at least one symbol.")
+    if config.trading.strategy not in {"bot2"}:
+        raise ConfigError("trading.strategy must be 'bot2'.")
     if not 0 < config.trading.risk_per_trade <= 0.01:
         raise ConfigError("trading.risk_per_trade must be greater than 0 and no more than 0.01.")
+    if not 0 < config.risk.max_position_notional_pct <= 1:
+        raise ConfigError("risk.max_position_notional_pct must be between 0 and 1.")
+    if config.risk.max_open_positions <= 0:
+        raise ConfigError("risk.max_open_positions must be greater than zero.")
+    if not 0 <= config.risk.cash_reserve_pct < 1:
+        raise ConfigError("risk.cash_reserve_pct must be between 0 and 1.")
+    if not 0 < config.risk.max_deployed_pct <= 1:
+        raise ConfigError("risk.max_deployed_pct must be between 0 and 1.")
+    if not 0 < config.risk.max_daily_drawdown <= 1:
+        raise ConfigError("risk.max_daily_drawdown must be between 0 and 1.")
+    if not 0 < config.risk.max_sector_pct <= 1:
+        raise ConfigError("risk.max_sector_pct must be between 0 and 1.")
     if config.trading.live_trading and config.alpaca.paper:
         raise ConfigError("LIVE_TRADING=true requires ALPACA_PAPER=false for explicit live mode selection.")
     if config.market_data.source not in {"alpaca", "yfinance"}:
@@ -384,6 +459,10 @@ def _env_float(name: str, default: float) -> float:
     return _as_float(os.getenv(name, default), name)
 
 
+def _env_symbol_tuple(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    return _as_symbol_tuple(os.getenv(name, ",".join(default)), name)
+
+
 def _as_bool(value: Any, name: str) -> bool:
     if isinstance(value, bool):
         return value
@@ -408,3 +487,24 @@ def _as_float(value: Any, name: str) -> float:
         return float(value)
     except (TypeError, ValueError) as exc:
         raise ConfigError(f"{name} must be a number.") from exc
+
+
+def _as_symbol_tuple(value: Any, name: str) -> tuple[str, ...]:
+    if isinstance(value, str):
+        symbols = [item.strip().upper() for item in value.split(",")]
+    elif isinstance(value, (list, tuple)):
+        symbols = [str(item).strip().upper() for item in value]
+    else:
+        raise ConfigError(f"{name} must be a string or list of symbols.")
+    normalized = tuple(symbol for symbol in symbols if symbol)
+    if not normalized:
+        raise ConfigError(f"{name} must contain at least one symbol.")
+    return normalized
+
+
+def _as_str_mapping(value: Any, name: str) -> Mapping[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ConfigError(f"{name} must be a mapping.")
+    return {str(key).upper(): str(item).upper() for key, item in value.items()}

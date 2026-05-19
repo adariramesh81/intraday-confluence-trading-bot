@@ -17,8 +17,22 @@ alpaca:
 trading:
   live_trading: false
   default_symbol: SPY
+  watchlist:
+    - SPY
+  scan_interval_seconds: 60
+  strategy: bot2
   max_trades_per_day: 3
   risk_per_trade: 0.01
+
+risk:
+  max_position_notional_pct: 0.15
+  max_open_positions: 25
+  cash_reserve_pct: 0.04
+  max_deployed_pct: 0.96
+  max_daily_drawdown: 0.02
+  max_sector_pct: 0.60
+  symbol_sectors:
+    SPY: ETF
 
 market_data:
   source: alpaca

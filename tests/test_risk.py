@@ -29,10 +29,22 @@ def _healthy_drawdown_state() -> DrawdownState:
 def test_position_size_risks_one_percent_of_capital() -> None:
     size = calculate_position_size(account_equity=100_000, entry_price=100, stop_loss=98)
 
+    assert size.quantity == 150
+    assert size.capital_at_risk == 300
+    assert size.risk_per_share == 2
+    assert size.notional_value == 15_000
+
+
+def test_position_size_can_use_full_one_percent_when_notional_cap_allows() -> None:
+    size = calculate_position_size(
+        account_equity=100_000,
+        entry_price=100,
+        stop_loss=98,
+        settings=RiskSettings(max_position_notional_pct=1.0),
+    )
+
     assert size.quantity == 500
     assert size.capital_at_risk == 1000
-    assert size.risk_per_share == 2
-    assert size.notional_value == 50_000
 
 
 def test_buy_trade_levels_choose_tighter_supertrend_stop_and_minimum_target() -> None:
@@ -169,6 +181,34 @@ def test_risk_manager_blocks_guardrail_failure() -> None:
     assert decision.status == RiskDecisionStatus.BLOCKED
     assert decision.approved is False
     assert "Maximum daily trade limit reached." in decision.reasons
+
+
+def test_risk_manager_blocks_bot2_portfolio_caps() -> None:
+    manager = RiskManager()
+
+    decision = manager.evaluate_trade(
+        side=TradeSide.BUY,
+        account_equity=100_000,
+        entry_price=100,
+        atr=3,
+        drawdown_state=_healthy_drawdown_state(),
+        daily_counter=DailyTradeCounter(trading_day=date(2026, 5, 15), trades_taken=0),
+        open_positions_count=25,
+        deployed_notional=96_000,
+        cash=3_000,
+        sector_notional=60_000,
+    )
+
+    assert decision.status == RiskDecisionStatus.BLOCKED
+    assert "Maximum open position limit reached." in decision.reasons
+    assert "Maximum deployed capital limit reached." in decision.reasons
+    assert "Cash reserve requirement not met." in decision.reasons
+    assert "Maximum sector concentration reached." in decision.reasons
+
+
+def test_risk_settings_default_daily_loss_limit_is_two_percent() -> None:
+    assert RiskSettings().max_daily_drawdown_pct == 0.02
+    assert RiskSettings().max_open_positions == 25
 
 
 def test_position_sizer_rejects_more_than_one_percent_risk() -> None:
