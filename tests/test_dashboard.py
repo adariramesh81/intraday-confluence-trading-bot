@@ -5,10 +5,11 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+import pandas as pd
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from app.config import AlertConfig, AppConfig, DashboardConfig, StorageConfig
+from app.config import AlertConfig, AlpacaConfig, AppConfig, DashboardConfig, StorageConfig, TradingConfig
 from app.dashboard.schemas import (
     BacktestMetricsView,
     HealthStatus,
@@ -146,6 +147,101 @@ def test_dashboard_api_returns_read_only_snapshot() -> None:
     assert payload["portfolio"]["equity"] == 100_000
     assert payload["positions"][0]["symbol"] == "SPY"
     assert payload["signals"][0]["score"] == 100
+
+
+def test_dashboard_watchlist_get_seeds_from_config(tmp_path: Path) -> None:
+    app = create_app(
+        config=AppConfig(
+            trading=TradingConfig(watchlist=("SPY", "QQQ")),
+            storage=StorageConfig(sqlite_path=tmp_path / "dashboard.sqlite3"),
+        ),
+        state_manager=_state_manager(),
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/watchlist")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "symbols": ["SPY", "QQQ"],
+        "items": [
+            {"symbol": "SPY", "current_price": None},
+            {"symbol": "QQQ", "current_price": None},
+        ],
+    }
+
+
+def test_dashboard_watchlist_get_includes_latest_market_prices(tmp_path: Path) -> None:
+    class FakeMarketDataClient:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def fetch_ohlcv(self, **kwargs):
+            self.requests.append(kwargs)
+            return pd.DataFrame(
+                {
+                    "symbol": ["SPY", "SPY", "QQQ"],
+                    "timestamp": [
+                        pd.Timestamp("2026-05-15T14:30:00Z"),
+                        pd.Timestamp("2026-05-15T14:31:00Z"),
+                        pd.Timestamp("2026-05-15T14:31:00Z"),
+                    ],
+                    "open": [500, 501, 420],
+                    "high": [501, 502, 421],
+                    "low": [499, 500, 419],
+                    "close": [500.5, 501.25, 420.75],
+                    "volume": [1000, 1100, 900],
+                }
+            )
+
+    app = create_app(
+        config=AppConfig(
+            alpaca=AlpacaConfig(api_key="key", secret_key="secret"),
+            trading=TradingConfig(watchlist=("SPY", "QQQ")),
+            storage=StorageConfig(sqlite_path=tmp_path / "dashboard.sqlite3"),
+        ),
+        state_manager=_state_manager(),
+    )
+    fake_client = FakeMarketDataClient()
+    app.state.watchlist_market_data_client = fake_client
+    client = TestClient(app)
+
+    response = client.get("/api/watchlist")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "symbols": ["SPY", "QQQ"],
+        "items": [
+            {"symbol": "SPY", "current_price": 501.25},
+            {"symbol": "QQQ", "current_price": 420.75},
+        ],
+    }
+    assert fake_client.requests[0]["symbols"] == ["SPY", "QQQ"]
+
+
+def test_dashboard_watchlist_get_returns_null_prices_when_market_data_fails(tmp_path: Path) -> None:
+    class FailingMarketDataClient:
+        def fetch_ohlcv(self, **kwargs):
+            raise RuntimeError("market data unavailable")
+
+    app = create_app(
+        config=AppConfig(
+            alpaca=AlpacaConfig(api_key="key", secret_key="secret"),
+            trading=TradingConfig(watchlist=("SPY",)),
+            storage=StorageConfig(sqlite_path=tmp_path / "dashboard.sqlite3"),
+        ),
+        state_manager=_state_manager(),
+    )
+    app.state.watchlist_market_data_client = FailingMarketDataClient()
+    client = TestClient(app)
+
+    response = client.get("/api/watchlist")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "symbols": ["SPY"],
+        "items": [{"symbol": "SPY", "current_price": None}],
+    }
 
 
 def test_dashboard_auth_redirects_unauthenticated_page_and_blocks_snapshot(tmp_path: Path) -> None:
@@ -325,6 +421,52 @@ def test_admin_can_manage_dashboard_users(tmp_path: Path) -> None:
     assert store.get_user("friend@example.com").is_active is True
 
 
+def test_admin_can_update_watchlist(tmp_path: Path) -> None:
+    client, _ = _auth_app(tmp_path)
+
+    _login(client)
+    response = client.put("/api/watchlist", json={"symbols": ["spy", "QQQ", "spy"]})
+    get_response = client.get("/api/watchlist")
+
+    assert response.status_code == 200
+    assert response.json() == {"symbols": ["SPY", "QQQ"]}
+    assert get_response.json() == {
+        "symbols": ["SPY", "QQQ"],
+        "items": [
+            {"symbol": "SPY", "current_price": None},
+            {"symbol": "QQQ", "current_price": None},
+        ],
+    }
+
+
+def test_non_admin_cannot_update_watchlist(tmp_path: Path) -> None:
+    client, _ = _auth_app(
+        tmp_path,
+        email="friend@example.com",
+        password="friend-secret",
+        is_admin=False,
+    )
+
+    _login(client, email="friend@example.com", password="friend-secret")
+    response = client.put("/api/watchlist", json={"symbols": ["SPY", "QQQ"]})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin access required."
+
+
+def test_auth_disabled_dashboard_cannot_save_watchlist(tmp_path: Path) -> None:
+    app = create_app(
+        config=AppConfig(storage=StorageConfig(sqlite_path=tmp_path / "dashboard.sqlite3")),
+        state_manager=_state_manager(),
+    )
+    client = TestClient(app)
+
+    response = client.put("/api/watchlist", json={"symbols": ["SPY", "QQQ"]})
+
+    assert response.status_code == 403
+    assert "Enable dashboard auth" in response.json()["detail"]
+
+
 def test_non_admin_cannot_access_user_admin(tmp_path: Path) -> None:
     client, _ = _auth_app(
         tmp_path,
@@ -341,11 +483,10 @@ def test_non_admin_cannot_access_user_admin(tmp_path: Path) -> None:
 
 def test_dashboard_api_exposes_expected_read_only_routes() -> None:
     app = create_app(config=AppConfig(), state_manager=_state_manager())
-    route_methods = {
-        route.path: route.methods
-        for route in app.routes
-        if route.path.startswith("/api")
-    }
+    route_methods = {}
+    for route in app.routes:
+        if route.path.startswith("/api"):
+            route_methods.setdefault(route.path, set()).update(route.methods)
 
     assert route_methods["/api/health"] == {"GET"}
     assert route_methods["/api/portfolio"] == {"GET"}
@@ -354,17 +495,25 @@ def test_dashboard_api_exposes_expected_read_only_routes() -> None:
     assert route_methods["/api/signals"] == {"GET"}
     assert route_methods["/api/backtests"] == {"GET"}
     assert route_methods["/api/snapshot"] == {"GET"}
+    assert route_methods["/api/watchlist"] == {"GET", "PUT"}
 
 
-def test_dashboard_page_renders_without_trading_controls() -> None:
+def test_dashboard_page_renders_watchlist_without_order_submission_controls() -> None:
     app = create_app(config=AppConfig(), state_manager=_state_manager())
     client = TestClient(app)
 
     response = client.get("/")
 
     assert response.status_code == 200
+    assert 'class="dashboard-layout"' in response.text
+    assert 'class="dashboard-sidebar"' in response.text
+    assert 'class="dashboard-main"' in response.text
     assert "Open Positions" in response.text
     assert "Trade History" in response.text
+    assert "Trading Watchlist" in response.text
+    assert "Current Market Price" in response.text
+    assert 'id="watchlist-body"' in response.text
+    assert response.text.index("Trading Watchlist") < response.text.index("Open Positions")
     assert "submit_order" not in response.text
     assert "LIVE_TRADING" not in response.text
 

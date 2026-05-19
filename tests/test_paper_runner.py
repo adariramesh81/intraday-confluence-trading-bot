@@ -48,8 +48,10 @@ def _bot2_exit_bars() -> pd.DataFrame:
 class _FakeMarketDataClient:
     def __init__(self, bars: pd.DataFrame) -> None:
         self.bars = bars
+        self.symbols: list[str] = []
 
     def fetch_ohlcv(self, **kwargs):
+        self.symbols.append(kwargs["symbols"])
         return self.bars
 
 
@@ -82,6 +84,16 @@ class _FakePortfolioManager:
         return {"symbol": symbol}
 
 
+class _FakeWatchlistStore:
+    def __init__(self, symbols: list[str] | None = None) -> None:
+        self.symbols = symbols
+        self.defaults: list[tuple[str, ...]] = []
+
+    def get_watchlist(self, default_symbols):
+        self.defaults.append(tuple(default_symbols))
+        return self.symbols or list(default_symbols)
+
+
 def _portfolio(positions: list[PositionSnapshot] | None = None) -> PortfolioSnapshot:
     return PortfolioSnapshot(
         equity=100_000,
@@ -97,12 +109,15 @@ def _runner(
     bars: pd.DataFrame,
     portfolio_manager: _FakePortfolioManager,
     order_manager: _FakeOrderManager | None = None,
+    watchlist_store: _FakeWatchlistStore | None = None,
+    market_data_client: _FakeMarketDataClient | None = None,
 ) -> Bot2PaperRunner:
     return Bot2PaperRunner(
         config=AppConfig(trading=TradingConfig(watchlist=("SPY",), scan_interval_seconds=60)),
-        market_data_client=_FakeMarketDataClient(bars),
+        market_data_client=market_data_client or _FakeMarketDataClient(bars),
         portfolio_manager=portfolio_manager,
         order_manager=order_manager or _FakeOrderManager(),
+        watchlist_store=watchlist_store or _FakeWatchlistStore(),
     )
 
 
@@ -156,3 +171,50 @@ def test_runner_handles_account_fetch_failure_without_crashing() -> None:
     runner = _runner(_bot2_buy_bars(), _FakePortfolioManager(_portfolio(), fail=True))
 
     runner.scan_once()
+
+
+def test_runner_scans_symbols_from_saved_watchlist() -> None:
+    market_data_client = _FakeMarketDataClient(_bot2_buy_bars())
+    runner = _runner(
+        _bot2_buy_bars(),
+        _FakePortfolioManager(_portfolio()),
+        watchlist_store=_FakeWatchlistStore(["QQQ"]),
+        market_data_client=market_data_client,
+    )
+
+    runner.scan_once()
+
+    assert market_data_client.symbols == ["QQQ"]
+
+
+def test_runner_falls_back_to_config_watchlist_when_store_is_empty() -> None:
+    watchlist_store = _FakeWatchlistStore()
+    market_data_client = _FakeMarketDataClient(_bot2_buy_bars())
+    runner = _runner(
+        _bot2_buy_bars(),
+        _FakePortfolioManager(_portfolio()),
+        watchlist_store=watchlist_store,
+        market_data_client=market_data_client,
+    )
+
+    runner.scan_once()
+
+    assert watchlist_store.defaults == [("SPY",)]
+    assert market_data_client.symbols == ["SPY"]
+
+
+def test_runner_picks_up_changed_watchlist_on_next_scan() -> None:
+    watchlist_store = _FakeWatchlistStore(["SPY"])
+    market_data_client = _FakeMarketDataClient(_bot2_buy_bars())
+    runner = _runner(
+        _bot2_buy_bars(),
+        _FakePortfolioManager(_portfolio()),
+        watchlist_store=watchlist_store,
+        market_data_client=market_data_client,
+    )
+
+    runner.scan_once()
+    watchlist_store.symbols = ["QQQ"]
+    runner.scan_once()
+
+    assert market_data_client.symbols == ["SPY", "QQQ"]

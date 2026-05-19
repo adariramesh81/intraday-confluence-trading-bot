@@ -1,5 +1,7 @@
 const state = {
   refreshSeconds: Number(window.DASHBOARD_REFRESH_SECONDS || 5),
+  watchlist: [],
+  watchlistPrices: {},
 };
 
 const money = new Intl.NumberFormat("en-US", {
@@ -37,6 +39,30 @@ async function fetchSnapshot() {
     throw new Error(`Snapshot request failed: ${response.status}`);
   }
   return response.json();
+}
+
+async function fetchWatchlist() {
+  const response = await fetch("/api/watchlist", { headers: { accept: "application/json" } });
+  if (!response.ok) {
+    throw new Error(`Watchlist request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+async function saveWatchlist(symbols) {
+  const response = await fetch("/api/watchlist", {
+    method: "PUT",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ symbols }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.detail || `Watchlist save failed: ${response.status}`);
+  }
+  return payload;
 }
 
 function renderSnapshot(snapshot) {
@@ -128,11 +154,147 @@ function renderHealth(health) {
   setText("health-updated", formatDate(health.last_updated));
 }
 
+function renderWatchlist() {
+  setText("watchlist-count", String(state.watchlist.length));
+  const body = document.getElementById("watchlist-body");
+  if (!body) return;
+  body.innerHTML = state.watchlist.map((symbol) => `
+    <tr>
+      <td>
+        <div class="watchlist-symbol-cell">
+          <span>${escapeHtml(symbol)}</span>
+          <button type="button" data-symbol="${escapeHtml(symbol)}" aria-label="Remove ${escapeHtml(symbol)}">x</button>
+        </div>
+      </td>
+      <td>${formatWatchlistPrice(state.watchlistPrices[symbol])}</td>
+    </tr>
+  `).join("");
+}
+
+function formatWatchlistPrice(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  return money.format(Number(value));
+}
+
+function parseSymbols(value) {
+  return String(value || "")
+    .split(/[,\s]+/)
+    .map((symbol) => symbol.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+function addWatchlistSymbols(symbols) {
+  const merged = [...state.watchlist];
+  symbols.forEach((symbol) => {
+    if (!/^[A-Z][A-Z0-9.-]{0,14}$/.test(symbol)) {
+      throw new Error(`Invalid symbol: ${symbol}`);
+    }
+    if (!merged.includes(symbol)) {
+      merged.push(symbol);
+    }
+  });
+  if (!merged.length) {
+    throw new Error("Add at least one symbol.");
+  }
+  state.watchlist = merged;
+  renderWatchlist();
+}
+
+function removeWatchlistSymbol(symbol) {
+  state.watchlist = state.watchlist.filter((item) => item !== symbol);
+  delete state.watchlistPrices[symbol];
+  renderWatchlist();
+}
+
+function setWatchlistMessage(message, kind = "") {
+  const element = document.getElementById("watchlist-message");
+  if (!element) return;
+  element.textContent = message;
+  element.className = `watchlist-message ${kind}`.trim();
+}
+
+function watchlistPriceMap(items) {
+  return (items || []).reduce((prices, item) => {
+    if (item && item.symbol) {
+      prices[item.symbol] = item.current_price;
+    }
+    return prices;
+  }, {});
+}
+
+async function loadWatchlist({ clearMessage = true } = {}) {
+  try {
+    const payload = await fetchWatchlist();
+    state.watchlist = payload.symbols || [];
+    state.watchlistPrices = watchlistPriceMap(payload.items);
+    renderWatchlist();
+    if (clearMessage) {
+      setWatchlistMessage("");
+    }
+  } catch (error) {
+    setWatchlistMessage(error.message, "error");
+  }
+}
+
+function bindWatchlistControls() {
+  const form = document.getElementById("watchlist-form");
+  const input = document.getElementById("watchlist-input");
+  const save = document.getElementById("watchlist-save");
+  const body = document.getElementById("watchlist-body");
+
+  if (form && input) {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      try {
+        addWatchlistSymbols(parseSymbols(input.value));
+        input.value = "";
+        setWatchlistMessage("Ready to save.", "");
+      } catch (error) {
+        setWatchlistMessage(error.message, "error");
+      }
+    });
+  }
+
+  if (save) {
+    save.addEventListener("click", async () => {
+      try {
+        const payload = await saveWatchlist(state.watchlist);
+        state.watchlist = payload.symbols || [];
+        renderWatchlist();
+        await loadWatchlist({ clearMessage: false });
+        setWatchlistMessage("Watchlist saved.", "success");
+      } catch (error) {
+        setWatchlistMessage(error.message, "error");
+      }
+    });
+  }
+
+  if (body) {
+    body.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-symbol]");
+      if (!button) return;
+      removeWatchlistSymbol(button.dataset.symbol);
+      setWatchlistMessage("Ready to save.", "");
+    });
+  }
+}
+
 function formatDate(value) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function setConnectionState(label, muted = false) {
@@ -163,5 +325,10 @@ function connectWebSocket() {
 }
 
 refresh();
+bindWatchlistControls();
+loadWatchlist();
 connectWebSocket();
-window.setInterval(refresh, state.refreshSeconds * 1000);
+window.setInterval(() => {
+  refresh();
+  loadWatchlist({ clearMessage: false });
+}, state.refreshSeconds * 1000);

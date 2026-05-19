@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.dashboard.schemas import BacktestMetricsView, PortfolioView, PositionView, TradeView
+from app.utils.validators import DataValidationError, validate_symbols
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,12 @@ class AccountDataStore:
                     finished_at TEXT,
                     status TEXT NOT NULL,
                     error_message TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS watchlist_symbols (
+                    symbol TEXT PRIMARY KEY,
+                    position INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
                 """
             )
@@ -308,6 +315,35 @@ class AccountDataStore:
                 backtest_metrics=metrics,
             )
 
+    def get_watchlist(self, default_symbols: list[str] | tuple[str, ...]) -> list[str]:
+        """Return the saved trading watchlist, seeding it from defaults when empty."""
+
+        self.initialize()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT symbol FROM watchlist_symbols ORDER BY position, symbol"
+            ).fetchall()
+        if rows:
+            return [str(row["symbol"]) for row in rows]
+        return self.save_watchlist(list(default_symbols))
+
+    def save_watchlist(self, symbols: list[str] | tuple[str, ...]) -> list[str]:
+        """Validate, normalize, deduplicate, and persist the trading watchlist."""
+
+        normalized = _normalize_watchlist(symbols)
+        updated_at = _to_iso(_utc_now())
+        self.initialize()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM watchlist_symbols")
+            connection.executemany(
+                """
+                INSERT INTO watchlist_symbols (symbol, position, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                [(symbol, index, updated_at) for index, symbol in enumerate(normalized)],
+            )
+        return normalized
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.sqlite_path)
         connection.row_factory = sqlite3.Row
@@ -391,3 +427,19 @@ def _optional_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _normalize_watchlist(symbols: list[str] | tuple[str, ...]) -> list[str]:
+    try:
+        validated = validate_symbols(symbols)
+    except DataValidationError:
+        raise
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for symbol in validated:
+        if symbol not in seen:
+            seen.add(symbol)
+            deduped.append(symbol)
+    if not deduped:
+        raise DataValidationError("At least one watchlist symbol is required.")
+    return deduped

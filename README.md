@@ -29,4 +29,6 @@ python -m app.trading.paper_runner
 
 The dashboard is monitoring-only. Start the paper runner separately when you want automated Bot 2 scanning and paper order submission.
 
+The dashboard includes a Trading Watchlist panel. When dashboard authentication is enabled, an admin user can save stock or ETF symbols there, and the Bot 2 paper runner will pick up the saved list on its next scan cycle.
+
 Live trading is disabled by default. The bot only leaves paper mode when both `LIVE_TRADING=true` and `ALPACA_PAPER=false` are explicitly configured.

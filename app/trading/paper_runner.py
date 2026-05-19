@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 import pandas as pd
 
 from app.config import AppConfig, load_config
+from app.data.account_store import AccountDataStore
 from app.data.market_data import AlpacaMarketDataClient
 from app.execution import AlpacaExecutionClient, ExecutionSide, OrderManager, PortfolioManager
 from app.execution.types import ExecutionStatus, PortfolioSnapshot, PositionSnapshot
@@ -58,6 +59,7 @@ class Bot2PaperRunner:
         portfolio_manager: PortfolioManager | None = None,
         signal_engine: SignalEngine | None = None,
         risk_manager: RiskManager | None = None,
+        watchlist_store: AccountDataStore | None = None,
         trailing_state: Bot2TrailingState | None = None,
         logger: logging.Logger | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -70,6 +72,7 @@ class Bot2PaperRunner:
         self.portfolio_manager = portfolio_manager or PortfolioManager(self.execution_client, logger=self.logger)
         self.signal_engine = signal_engine or SignalEngine(logger=self.logger)
         self.risk_manager = risk_manager or RiskManager(_risk_settings_from_config(config), logger=self.logger)
+        self.watchlist_store = watchlist_store or AccountDataStore(config.storage.sqlite_path)
         self.trailing_state = trailing_state or Bot2TrailingState()
         self.sleep = sleep
 
@@ -90,6 +93,7 @@ class Bot2PaperRunner:
         try:
             portfolio = self.portfolio_manager.get_portfolio_snapshot()
             open_orders = self.order_manager.list_orders(status="open", limit=100)
+            watchlist = self.watchlist_store.get_watchlist(self.config.trading.watchlist)
         except Exception:
             self.logger.exception("Bot 2 scan skipped because account state could not be fetched.")
             return
@@ -98,7 +102,8 @@ class Bot2PaperRunner:
         positions = {position.symbol.upper(): position for position in portfolio.positions}
         deployed_notional = sum(abs(position.market_value) for position in portfolio.positions)
 
-        for symbol in self.config.trading.watchlist:
+        self.logger.info("Scanning Bot 2 watchlist.", extra={"watchlist": watchlist})
+        for symbol in watchlist:
             normalized = symbol.upper()
             try:
                 bars = self._fetch_recent_bars(normalized)

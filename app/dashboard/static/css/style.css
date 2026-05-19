@@ -100,6 +100,23 @@ h2 {
   padding: 20px 24px 32px;
 }
 
+.dashboard-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 15fr) minmax(0, 75fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.dashboard-sidebar,
+.dashboard-main {
+  min-width: 0;
+}
+
+.dashboard-sidebar {
+  position: sticky;
+  top: 16px;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -277,6 +294,116 @@ dd {
   display: block;
   margin-top: 8px;
   font-size: 20px;
+}
+
+.watchlist-editor {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.watchlist-table-wrap {
+  border: 1px solid #eef2f6;
+  border-radius: 8px;
+}
+
+.watchlist-table {
+  min-width: 100%;
+  font-size: 12px;
+}
+
+.watchlist-table th,
+.watchlist-table td {
+  height: 38px;
+  padding: 0 10px;
+}
+
+.watchlist-symbol-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 800;
+}
+
+.watchlist-symbol-cell span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watchlist-symbol-cell button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: #e8f6f3;
+  color: #0e5f59;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.watchlist-symbol-cell button:hover {
+  background: #dff0ed;
+}
+
+.watchlist-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.watchlist-form label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.watchlist-form input {
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.watchlist-form button {
+  min-height: 40px;
+  width: 100%;
+  border: 1px solid #b7d7d2;
+  border-radius: 6px;
+  background: #e8f6f3;
+  color: #0e5f59;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.watchlist-form button:hover {
+  border-color: #9abfba;
+  background: #dff0ed;
+}
+
+.watchlist-message {
+  min-height: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.watchlist-message.error {
+  color: var(--danger);
+}
+
+.watchlist-message.success {
+  color: var(--positive);
 }
 
 .positive {
@@ -473,6 +600,14 @@ dd {
     grid-template-columns: 1fr;
   }
 
+  .dashboard-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-sidebar {
+    position: static;
+  }
+
   .span-2,
   .span-3 {
     grid-column: span 1;
@@ -495,6 +630,10 @@ dd {
   }
 
   .admin-create-form {
+    grid-template-columns: 1fr;
+  }
+
+  .watchlist-form {
     grid-template-columns: 1fr;
   }
 }
