@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +22,37 @@ class StoredDashboardData:
     positions: list[PositionView]
     trades: list[TradeView]
     backtest_metrics: BacktestMetricsView
+
+
+@dataclass(frozen=True)
+class CompletedTradeHistoryPage:
+    """Page of completed long trades derived from saved Alpaca fills."""
+
+    items: list[TradeView]
+    page: int
+    page_size: int
+    total: int
+    pages: int
+
+
+@dataclass
+class _FillGroup:
+    symbol: str
+    side: str
+    quantity: float
+    notional: float
+    transaction_time: datetime | None
+
+    @property
+    def price(self) -> float:
+        return self.notional / self.quantity if self.quantity else 0.0
+
+
+@dataclass
+class _EntryLot:
+    quantity: float
+    price: float
+    opened_at: datetime | None
 
 
 class AccountDataStore:
@@ -272,6 +304,71 @@ class AccountDataStore:
                 ],
             )
 
+    def load_completed_trade_history(self, page: int = 1, page_size: int = 25) -> CompletedTradeHistoryPage:
+        """Return one page of completed long trades derived from fill activities."""
+
+        if page <= 0:
+            raise ValueError("page must be greater than zero.")
+        if page_size <= 0:
+            raise ValueError("page_size must be greater than zero.")
+
+        trades = self.list_completed_trades()
+        total = len(trades)
+        pages = max(1, math.ceil(total / page_size))
+        normalized_page = min(page, pages)
+        offset = (normalized_page - 1) * page_size
+        return CompletedTradeHistoryPage(
+            items=trades[offset : offset + page_size],
+            page=normalized_page,
+            page_size=page_size,
+            total=total,
+            pages=pages,
+        )
+
+    def list_completed_trades(self) -> list[TradeView]:
+        """Return completed long trades newest first from saved fill activities."""
+
+        self.initialize()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM trade_activities
+                WHERE LOWER(COALESCE(activity_type, '')) = 'fill'
+                ORDER BY COALESCE(transaction_time, ''), activity_id
+                """
+            ).fetchall()
+        return _completed_trades_from_fill_rows(rows)
+
+    def list_raw_orders(self) -> list[dict[str, Any]]:
+        """Return saved Alpaca order rows newest first for audit display."""
+
+        self.initialize()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT order_id, symbol, side, quantity, status, submitted_at, filled_at,
+                       filled_quantity, filled_average_price
+                FROM orders
+                ORDER BY COALESCE(filled_at, submitted_at, '') DESC, order_id DESC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_raw_fill_activities(self) -> list[dict[str, Any]]:
+        """Return saved Alpaca fill activities newest first for audit display."""
+
+        self.initialize()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT activity_id, symbol, side, quantity, price, transaction_time, order_id
+                FROM trade_activities
+                WHERE LOWER(COALESCE(activity_type, '')) = 'fill'
+                ORDER BY COALESCE(transaction_time, '') DESC, activity_id DESC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def load_dashboard_data(self) -> StoredDashboardData:
         """Load latest stored data for dashboard fallback or startup hydration."""
 
@@ -387,6 +484,107 @@ def _trade_from_order_row(row: sqlite3.Row) -> TradeView:
         closed_at=_parse_datetime(row["filled_at"]),
         realized_pl=0.0,
     )
+
+
+def _completed_trades_from_fill_rows(rows: list[sqlite3.Row]) -> list[TradeView]:
+    entry_lots: dict[str, list[_EntryLot]] = {}
+    completed: list[TradeView] = []
+    for group in _fill_groups(rows):
+        lots = entry_lots.setdefault(group.symbol, [])
+        if group.side == "buy":
+            lots.append(_EntryLot(quantity=group.quantity, price=group.price, opened_at=group.transaction_time))
+            continue
+        if group.side != "sell":
+            continue
+
+        remaining = group.quantity
+        matched_quantity = 0.0
+        entry_notional = 0.0
+        realized_pl = 0.0
+        opened_at: datetime | None = None
+        while lots and remaining > 1e-9:
+            lot = lots[0]
+            matched = min(remaining, lot.quantity)
+            matched_quantity += matched
+            entry_notional += matched * lot.price
+            realized_pl += matched * (group.price - lot.price)
+            opened_at = _earliest_datetime(opened_at, lot.opened_at)
+            remaining -= matched
+            lot.quantity -= matched
+            if lot.quantity <= 1e-9:
+                lots.pop(0)
+
+        if matched_quantity > 1e-9:
+            completed.append(
+                TradeView(
+                    symbol=group.symbol,
+                    side="BUY",
+                    quantity=matched_quantity,
+                    entry_price=entry_notional / matched_quantity,
+                    exit_price=group.price,
+                    opened_at=opened_at,
+                    closed_at=group.transaction_time,
+                    realized_pl=realized_pl,
+                )
+            )
+
+    return sorted(
+        completed,
+        key=lambda trade: trade.closed_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+
+def _fill_groups(rows: list[sqlite3.Row]) -> list[_FillGroup]:
+    groups: dict[str, _FillGroup] = {}
+    for row in rows:
+        symbol = str(row["symbol"] or "").strip().upper()
+        side = str(row["side"] or "").strip().lower()
+        quantity = _optional_float(row["quantity"]) or 0.0
+        price = _optional_float(row["price"]) or 0.0
+        if not symbol or side not in {"buy", "sell"} or quantity <= 0 or price <= 0:
+            continue
+
+        key = str(row["order_id"] or row["activity_id"])
+        timestamp = _parse_datetime(row["transaction_time"])
+        group = groups.get(key)
+        if group is None or group.symbol != symbol or group.side != side:
+            groups[key] = _FillGroup(
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                notional=quantity * price,
+                transaction_time=timestamp,
+            )
+            continue
+
+        group.quantity += quantity
+        group.notional += quantity * price
+        if group.side == "sell":
+            group.transaction_time = _latest_datetime(group.transaction_time, timestamp)
+        else:
+            group.transaction_time = _earliest_datetime(group.transaction_time, timestamp)
+
+    return sorted(
+        groups.values(),
+        key=lambda group: group.transaction_time or datetime.min.replace(tzinfo=timezone.utc),
+    )
+
+
+def _earliest_datetime(left: datetime | None, right: datetime | None) -> datetime | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return min(left, right)
+
+
+def _latest_datetime(left: datetime | None, right: datetime | None) -> datetime | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return max(left, right)
 
 
 def _backtest_metrics_from_history(rows: list[sqlite3.Row]) -> BacktestMetricsView:

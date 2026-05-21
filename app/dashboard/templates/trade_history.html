@@ -1,0 +1,122 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<section class="history-page">
+  <section class="panel history-panel">
+    <div class="panel-header">
+      <h2>Completed Trades</h2>
+      <span class="count">{{ completed_trades|length }}</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>Realized</th>
+            <th>Opened</th>
+            <th>Closed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for trade in completed_trades %}
+          <tr>
+            <td>{{ trade.symbol }}</td>
+            <td>{{ trade.side }}</td>
+            <td>{{ "%.4f"|format(trade.quantity) }}</td>
+            <td>{{ "$%.4f"|format(trade.entry_price or 0) }}</td>
+            <td>{{ "$%.4f"|format(trade.exit_price or 0) }}</td>
+            <td class="{{ 'positive' if trade.realized_pl >= 0 else 'negative' }}">{{ "$%.2f"|format(trade.realized_pl) }}</td>
+            <td>{{ trade.opened_at.isoformat() if trade.opened_at else "-" }}</td>
+            <td>{{ trade.closed_at.isoformat() if trade.closed_at else "-" }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8">No completed trades from saved fill history.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel history-panel">
+    <div class="panel-header">
+      <h2>Raw Orders</h2>
+      <span class="count">{{ orders|length }}</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Status</th>
+            <th>Filled Qty</th>
+            <th>Avg Price</th>
+            <th>Submitted</th>
+            <th>Filled</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+          <tr>
+            <td>{{ order.order_id }}</td>
+            <td>{{ order.symbol }}</td>
+            <td>{{ order.side|upper }}</td>
+            <td>{{ "%.4f"|format(order.quantity or 0) }}</td>
+            <td>{{ order.status }}</td>
+            <td>{{ "%.4f"|format(order.filled_quantity or 0) }}</td>
+            <td>{{ "$%.4f"|format(order.filled_average_price or 0) }}</td>
+            <td>{{ order.submitted_at or "-" }}</td>
+            <td>{{ order.filled_at or "-" }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9">No saved orders.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel history-panel">
+    <div class="panel-header">
+      <h2>Raw Fill Activities</h2>
+      <span class="count">{{ fills|length }}</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Fill</th>
+            <th>Order</th>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Transaction</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for fill in fills %}
+          <tr>
+            <td>{{ fill.activity_id }}</td>
+            <td>{{ fill.order_id or "-" }}</td>
+            <td>{{ fill.symbol or "-" }}</td>
+            <td>{{ fill.side|upper }}</td>
+            <td>{{ "%.4f"|format(fill.quantity or 0) }}</td>
+            <td>{{ "$%.4f"|format(fill.price or 0) }}</td>
+            <td>{{ fill.transaction_time or "-" }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7">No saved fill activities.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>
+{% endblock %}

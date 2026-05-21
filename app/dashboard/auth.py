@@ -38,7 +38,13 @@ def public_http_path(path: str) -> bool:
 def protected_http_path(path: str) -> bool:
     """Return whether an HTTP path should require a dashboard session."""
 
-    return path == "/" or path == "/change-password" or path.startswith("/api/") or path.startswith("/admin/")
+    return (
+        path == "/"
+        or path == "/change-password"
+        or path == "/trade-history"
+        or path.startswith("/api/")
+        or path.startswith("/admin/")
+    )
 
 
 def auth_is_configured(config: DashboardConfig) -> bool:

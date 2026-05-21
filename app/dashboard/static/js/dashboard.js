@@ -2,6 +2,12 @@ const state = {
   refreshSeconds: Number(window.DASHBOARD_REFRESH_SECONDS || 5),
   watchlist: [],
   watchlistPrices: {},
+  tradeHistory: {
+    page: 1,
+    pageSize: 25,
+    pages: 1,
+    total: 0,
+  },
 };
 
 const money = new Intl.NumberFormat("en-US", {
@@ -65,10 +71,19 @@ async function saveWatchlist(symbols) {
   return payload;
 }
 
+async function fetchTradeHistory(page = 1, pageSize = 25) {
+  const response = await fetch(`/api/trade-history?page=${page}&page_size=${pageSize}`, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`Trade history request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
 function renderSnapshot(snapshot) {
   renderPortfolio(snapshot.portfolio || {});
   renderPositions(snapshot.positions || []);
-  renderTrades(snapshot.trades || []);
   renderSignals(snapshot.signals || []);
   renderBacktests(snapshot.backtest_metrics || {});
   renderHealth(snapshot.health || {});
@@ -101,14 +116,24 @@ function renderPositions(positions) {
   `).join("");
 }
 
-function renderTrades(trades) {
-  setText("trades-count", String(trades.length));
+function renderTrades(history) {
+  const trades = history.items || [];
+  state.tradeHistory.page = Number(history.page || 1);
+  state.tradeHistory.pageSize = Number(history.page_size || state.tradeHistory.pageSize);
+  state.tradeHistory.pages = Number(history.pages || 1);
+  state.tradeHistory.total = Number(history.total || 0);
+  setText("trades-count", String(state.tradeHistory.total));
   const body = document.getElementById("trades-body");
   if (!body) return;
+  if (!trades.length) {
+    body.innerHTML = '<tr><td colspan="7">No completed trades from saved fill history.</td></tr>';
+    renderTradePagination();
+    return;
+  }
   body.innerHTML = trades.map((trade) => `
     <tr>
-      <td>${trade.symbol}</td>
-      <td>${trade.side}</td>
+      <td>${escapeHtml(trade.symbol)}</td>
+      <td>${escapeHtml(trade.side)}</td>
       <td>${number.format(trade.quantity || 0)}</td>
       <td>${trade.entry_price === null ? "-" : money.format(trade.entry_price || 0)}</td>
       <td>${trade.exit_price === null ? "-" : money.format(trade.exit_price || 0)}</td>
@@ -116,6 +141,7 @@ function renderTrades(trades) {
       <td>${formatDate(trade.closed_at)}</td>
     </tr>
   `).join("");
+  renderTradePagination();
 }
 
 function renderSignals(signals) {
@@ -238,6 +264,47 @@ async function loadWatchlist({ clearMessage = true } = {}) {
   }
 }
 
+async function loadTradeHistory(page = state.tradeHistory.page) {
+  try {
+    renderTrades(await fetchTradeHistory(page, state.tradeHistory.pageSize));
+  } catch (error) {
+    const body = document.getElementById("trades-body");
+    if (body) {
+      body.innerHTML = `<tr><td colspan="7">${escapeHtml(error.message)}</td></tr>`;
+    }
+  }
+}
+
+function renderTradePagination() {
+  const pagination = document.getElementById("trade-pagination");
+  if (!pagination) return;
+  if (state.tradeHistory.pages <= 1) {
+    pagination.innerHTML = `<span class="muted-text">Page 1 of 1</span>`;
+    return;
+  }
+
+  pagination.innerHTML = pageTokens(state.tradeHistory.page, state.tradeHistory.pages).map((token) => {
+    if (token === "...") {
+      return '<span class="trade-page-gap">...</span>';
+    }
+    const selected = token === state.tradeHistory.page ? ' aria-current="page" disabled' : "";
+    return `<button type="button" data-page="${token}"${selected}>${token}</button>`;
+  }).join("");
+}
+
+function pageTokens(page, pages) {
+  const visible = new Set([1, pages, page - 2, page - 1, page, page + 1, page + 2]);
+  const numbers = [...visible].filter((value) => value >= 1 && value <= pages).sort((left, right) => left - right);
+  const tokens = [];
+  numbers.forEach((value, index) => {
+    if (index && value - numbers[index - 1] > 1) {
+      tokens.push("...");
+    }
+    tokens.push(value);
+  });
+  return tokens;
+}
+
 function bindWatchlistControls() {
   const form = document.getElementById("watchlist-form");
   const input = document.getElementById("watchlist-input");
@@ -279,6 +346,16 @@ function bindWatchlistControls() {
       setWatchlistMessage("Ready to save.", "");
     });
   }
+}
+
+function bindTradePagination() {
+  const pagination = document.getElementById("trade-pagination");
+  if (!pagination) return;
+  pagination.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-page]");
+    if (!button) return;
+    loadTradeHistory(Number(button.dataset.page));
+  });
 }
 
 function formatDate(value) {
@@ -326,9 +403,12 @@ function connectWebSocket() {
 
 refresh();
 bindWatchlistControls();
+bindTradePagination();
 loadWatchlist();
+loadTradeHistory();
 connectWebSocket();
 window.setInterval(() => {
   refresh();
   loadWatchlist({ clearMessage: false });
+  loadTradeHistory();
 }, state.refreshSeconds * 1000);

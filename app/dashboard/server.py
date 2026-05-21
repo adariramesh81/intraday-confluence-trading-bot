@@ -101,7 +101,7 @@ def create_app(
             session = get_request_session(request, app_config.dashboard, app.state.dashboard_user_store)
             request.state.dashboard_session = session
             if session is None:
-                if path == "/" or path == "/change-password" or path.startswith("/admin/"):
+                if path in {"/", "/change-password", "/trade-history"} or path.startswith("/admin/"):
                     return RedirectResponse("/login", status_code=303)
                 if protected_http_path(path):
                     return JSONResponse({"detail": AUTH_REQUIRED_MESSAGE}, status_code=401)
@@ -160,6 +160,26 @@ def create_app(
                 "auth_enabled": app_config.dashboard.auth_enabled,
                 "user_email": _session_email(request),
                 "user_is_admin": _session_is_admin(request),
+            },
+        )
+
+    @app.get("/trade-history", response_class=HTMLResponse)
+    async def trade_history(request: Request) -> HTMLResponse:
+        """Render saved completed trades plus raw order and fill history."""
+
+        store = AccountDataStore(app_config.storage.sqlite_path)
+        return templates.TemplateResponse(
+            request,
+            "trade_history.html",
+            {
+                "title": app_config.dashboard.title,
+                "refresh_seconds": app_config.dashboard.refresh_seconds,
+                "auth_enabled": app_config.dashboard.auth_enabled,
+                "user_email": _session_email(request),
+                "user_is_admin": _session_is_admin(request),
+                "completed_trades": store.list_completed_trades(),
+                "orders": store.list_raw_orders(),
+                "fills": store.list_raw_fill_activities(),
             },
         )
 

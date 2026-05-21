@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.data.account_store import AccountDataStore
 from app.data.market_data import AlpacaMarketDataClient
@@ -52,6 +52,25 @@ def get_trades(request: Request) -> list[dict]:
     """Return trade history state."""
 
     return to_jsonable(get_state_manager(request).snapshot().trades)
+
+
+@router.get("/trade-history")
+def get_trade_history(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+) -> dict:
+    """Return completed long trade history with realized P/L."""
+
+    store = AccountDataStore(request.app.state.config.storage.sqlite_path)
+    history = store.load_completed_trade_history(page=page, page_size=page_size)
+    return {
+        "items": to_jsonable(history.items),
+        "page": history.page,
+        "page_size": history.page_size,
+        "total": history.total,
+        "pages": history.pages,
+    }
 
 
 @router.get("/signals")

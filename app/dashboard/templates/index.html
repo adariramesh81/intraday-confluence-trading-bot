@@ -87,6 +87,33 @@
         </dl>
       </section>
 
+      <section class="panel span-3">
+        <div class="panel-header">
+          <h2>Trade History</h2>
+          <div class="panel-actions">
+            <span id="trades-count" class="count">0</span>
+            <a class="panel-link" href="/trade-history" target="_blank" rel="noopener">View All Trades</a>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Qty</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>Realized</th>
+                <th>Closed</th>
+              </tr>
+            </thead>
+            <tbody id="trades-body"></tbody>
+          </table>
+        </div>
+        <nav id="trade-pagination" class="trade-pagination" aria-label="Trade history pages"></nav>
+      </section>
+
       <section class="panel span-2">
         <div class="panel-header">
           <h2>Live Signals</h2>
@@ -106,29 +133,6 @@
           <div><span>Sharpe</span><strong id="bt-sharpe">0.00</strong></div>
           <div><span>Expectancy</span><strong id="bt-expectancy">$0.00</strong></div>
           <div><span>Trades</span><strong id="bt-trades">0</strong></div>
-        </div>
-      </section>
-
-      <section class="panel span-3">
-        <div class="panel-header">
-          <h2>Trade History</h2>
-          <span id="trades-count" class="count">0</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Side</th>
-                <th>Qty</th>
-                <th>Entry</th>
-                <th>Exit</th>
-                <th>Realized</th>
-                <th>Closed</th>
-              </tr>
-            </thead>
-            <tbody id="trades-body"></tbody>
-          </table>
         </div>
       </section>
     </section>

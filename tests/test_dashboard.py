@@ -21,6 +21,7 @@ from app.dashboard.schemas import (
 from app.dashboard.server import create_app
 from app.dashboard.state_manager import DashboardStateManager
 from app.dashboard.user_store import DashboardUserStore
+from app.data.account_store import AccountDataStore
 from app.utils.alert_manager import AlertManager
 
 
@@ -131,6 +132,41 @@ def _login(client: TestClient, email: str = "admin@example.com", password: str =
         data={"email": email, "password": password},
         follow_redirects=False,
     )
+
+
+def _save_completed_trade_history(store: AccountDataStore, count: int) -> None:
+    store.initialize()
+    activities = []
+    for index in range(count):
+        symbol = f"T{index}"
+        minute = f"{index % 60:02d}"
+        activities.extend(
+            [
+                {
+                    "activity_id": f"buy-{index}",
+                    "activity_type": "FILL",
+                    "symbol": symbol,
+                    "side": "buy",
+                    "quantity": 1,
+                    "price": 100 + index,
+                    "transaction_time": f"2026-05-21T14:{minute}:00+00:00",
+                    "order_id": f"buy-order-{index}",
+                    "raw": {},
+                },
+                {
+                    "activity_id": f"sell-{index}",
+                    "activity_type": "FILL",
+                    "symbol": symbol,
+                    "side": "sell",
+                    "quantity": 1,
+                    "price": 101 + index,
+                    "transaction_time": f"2026-05-21T15:{minute}:00+00:00",
+                    "order_id": f"sell-order-{index}",
+                    "raw": {},
+                },
+            ]
+        )
+    store.save_trade_activities(activities)
 
 
 def test_dashboard_api_returns_read_only_snapshot() -> None:
@@ -244,6 +280,26 @@ def test_dashboard_watchlist_get_returns_null_prices_when_market_data_fails(tmp_
     }
 
 
+def test_dashboard_trade_history_api_paginates_completed_trades_with_realized_pl(tmp_path: Path) -> None:
+    config = AppConfig(storage=StorageConfig(sqlite_path=tmp_path / "dashboard.sqlite3"))
+    store = AccountDataStore(config.storage.sqlite_path)
+    _save_completed_trade_history(store, 26)
+    app = create_app(config=config, state_manager=_state_manager())
+    client = TestClient(app)
+
+    response = client.get("/api/trade-history")
+    next_response = client.get("/api/trade-history?page=2&page_size=25")
+
+    assert response.status_code == 200
+    assert response.json()["page_size"] == 25
+    assert response.json()["total"] == 26
+    assert response.json()["pages"] == 2
+    assert len(response.json()["items"]) == 25
+    assert response.json()["items"][0]["realized_pl"] == 1
+    assert next_response.json()["page"] == 2
+    assert len(next_response.json()["items"]) == 1
+
+
 def test_dashboard_auth_redirects_unauthenticated_page_and_blocks_snapshot(tmp_path: Path) -> None:
     client, _ = _auth_app(tmp_path)
 
@@ -254,6 +310,15 @@ def test_dashboard_auth_redirects_unauthenticated_page_and_blocks_snapshot(tmp_p
     assert page_response.headers["location"] == "/login"
     assert snapshot_response.status_code == 401
     assert snapshot_response.json()["detail"] == "Authentication required."
+
+
+def test_dashboard_auth_redirects_unauthenticated_trade_history_page(tmp_path: Path) -> None:
+    client, _ = _auth_app(tmp_path)
+
+    response = client.get("/trade-history", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
 
 
 def test_login_page_renders_before_dashboard(tmp_path: Path) -> None:
@@ -492,6 +557,7 @@ def test_dashboard_api_exposes_expected_read_only_routes() -> None:
     assert route_methods["/api/portfolio"] == {"GET"}
     assert route_methods["/api/positions"] == {"GET"}
     assert route_methods["/api/trades"] == {"GET"}
+    assert route_methods["/api/trade-history"] == {"GET"}
     assert route_methods["/api/signals"] == {"GET"}
     assert route_methods["/api/backtests"] == {"GET"}
     assert route_methods["/api/snapshot"] == {"GET"}
@@ -510,12 +576,47 @@ def test_dashboard_page_renders_watchlist_without_order_submission_controls() ->
     assert 'class="dashboard-main"' in response.text
     assert "Open Positions" in response.text
     assert "Trade History" in response.text
+    assert "View All Trades" in response.text
+    assert 'id="trade-pagination"' in response.text
     assert "Trading Watchlist" in response.text
     assert "Current Market Price" in response.text
     assert 'id="watchlist-body"' in response.text
     assert response.text.index("Trading Watchlist") < response.text.index("Open Positions")
+    assert response.text.index("Trade History") < response.text.index("Live Signals")
+    assert response.text.index("Trade History") < response.text.index("Backtest Analytics")
     assert "submit_order" not in response.text
     assert "LIVE_TRADING" not in response.text
+
+
+def test_trade_history_page_shows_completed_and_raw_saved_history(tmp_path: Path) -> None:
+    config = AppConfig(storage=StorageConfig(sqlite_path=tmp_path / "dashboard.sqlite3"))
+    store = AccountDataStore(config.storage.sqlite_path)
+    _save_completed_trade_history(store, 1)
+    store.save_orders(
+        [
+            {
+                "order_id": "raw-order",
+                "symbol": "SPY",
+                "side": "buy",
+                "quantity": 1,
+                "status": "filled",
+                "filled_quantity": 1,
+                "filled_average_price": 100,
+                "raw": {},
+            }
+        ]
+    )
+    app = create_app(config=config, state_manager=_state_manager())
+    client = TestClient(app)
+
+    response = client.get("/trade-history")
+
+    assert response.status_code == 200
+    assert "Completed Trades" in response.text
+    assert "Raw Orders" in response.text
+    assert "Raw Fill Activities" in response.text
+    assert "raw-order" in response.text
+    assert "$1.00" in response.text
 
 
 def test_dashboard_websocket_sends_initial_snapshot() -> None:
