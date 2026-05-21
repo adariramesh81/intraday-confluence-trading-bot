@@ -10,7 +10,11 @@ services:
       ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
       ALPACA_PAPER: ${ALPACA_PAPER:-true}
       LIVE_TRADING: ${LIVE_TRADING:-false}
+      RUN_PAPER_WORKER: ${RUN_PAPER_WORKER:-true}
       DEFAULT_SYMBOL: ${DEFAULT_SYMBOL:-SPY}
+      TRADING_WATCHLIST: ${TRADING_WATCHLIST:-SPY}
+      TRADING_STRATEGY: ${TRADING_STRATEGY:-bot2}
+      TRADING_SCAN_INTERVAL_SECONDS: ${TRADING_SCAN_INTERVAL_SECONDS:-60}
       MAX_TRADES_PER_DAY: ${MAX_TRADES_PER_DAY:-3}
       RISK_PER_TRADE: ${RISK_PER_TRADE:-0.01}
       MARKET_DATA_SOURCE: ${MARKET_DATA_SOURCE:-alpaca}
@@ -23,5 +27,6 @@ services:
       MARKET_DATA_TIMEOUT_SECONDS: ${MARKET_DATA_TIMEOUT_SECONDS:-30}
     volumes:
       - ./logs:/app/logs
+      - ./data:/app/data
       - ./config.yaml:/app/config.yaml:ro
     restart: on-failure
